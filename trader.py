@@ -1,33 +1,110 @@
-# trader.py
-from client import auth_client
-import uuid # Needed to generate a unique client_order_id
+﻿import numpy as np
+import time # <--- CRITICAL FIX: Add this import for time.time()
+from notifications import send_telegram_notification
 
-def execute_order(side, product, size):
-    # The new SDK requires a unique client_order_id for every new order
-    client_order_id = str(uuid.uuid4())
-    size_str = f"{size:.8f}" # Ensure size is a precise string
+# --- Trading Indicator Logic ---
 
-    if side.lower() == 'buy':
-        # Market order to spend 'quote_size' (e.g., USD)
-        order = auth_client.market_order_buy(
-            client_order_id=client_order_id,
-            product_id=product,
-            quote_size=size_str # We use quote_size since we calculated size based on USD risk
-        )
-    elif side.lower() == 'sell':
-        # Market order to sell 'base_size' (e.g., BTC)
-        order = auth_client.market_order_sell(
-            client_order_id=client_order_id,
-            product_id=product,
-            base_size=size_str
-        )
+def calculate_sma(data, window):
+    """Calculates the Simple Moving Average (SMA)."""
+    return np.mean(data[-window:])
+
+def check_for_signal(closes, short_period, long_period):
+    """
+    Checks for a Simple Moving Average (SMA) crossover signal.
+    Returns 'BUY', 'SELL', or 'HOLD'.
+    """
+    short_sma = calculate_sma(closes, short_period)
+    long_sma = calculate_sma(closes, long_period)
+
+    prev_short_sma = calculate_sma(closes[:-1], short_period)
+    prev_long_sma = calculate_sma(closes[:-1], long_period)
+
+    if short_sma > long_sma and prev_short_sma <= prev_long_sma:
+        return 'BUY'
+    elif short_sma < long_sma and prev_short_sma >= prev_long_sma:
+        return 'SELL'
     else:
-        # Handle case where side is neither buy nor sell
-        raise ValueError("Invalid side: must be 'buy' or 'sell'")
+        return 'HOLD'
+
+# --- Advanced Trade SDK Functions ---
+
+def get_usd_balance(private_client):
+    """
+    Fetches the available USD balance from the Coinbase account using the
+    CORRECT object structure for the Advanced Trade SDK.
+    """
+    try:
+        accounts_response = private_client.get_accounts()
         
-    # The response structure is also different. Check for 'success'
-    if order.get('success'):
-        return order['success_response']
-    else:
-        # Handle error case
-        raise Exception(f"Order failed: {order.get('error_response')}")
+        # FIX: Use hasattr() to safely check if the 'accounts' attribute exists 
+        # on the response object before attempting to iterate.
+        if hasattr(accounts_response, 'accounts') and accounts_response.accounts:
+            for account in accounts_response.accounts:
+                
+                # Check for 'USD' currency
+                if account.currency == 'USD':
+                    # Access the nested value attribute
+                    balance_value = account.available_balance.value
+                    balance = float(balance_value)
+                    
+                    # DEBUG PRINT: Print the found balance for verification
+                    print(f"DEBUG: Found USD Account. Available Balance: ${balance:.2f}")
+                    
+                    return balance
+
+        # If accounts list is empty or USD not found
+        print("DEBUG: USD account not found, or accounts list is empty.")
+        return 0.0
+
+    except Exception as e:
+        # This will catch errors like missing API permissions
+        print(f"ERROR fetching USD balance: {e}")
+        send_telegram_notification(f"‼️ Account Read Error: {e}") 
+        return None
+
+def calculate_position_size(usd_balance, last_close_price, risk_percentage):
+    """
+    Calculates the quantity of the product to buy based on available USD balance.
+    """
+    try:
+        investment_amount = usd_balance * risk_percentage
+        
+        if investment_amount < 10:  
+            print("Calculated investment amount is less than $10 minimum.")
+            return 0.0
+
+        quantity = investment_amount / last_close_price
+        
+        return round(quantity, 4)
+
+    except Exception as e:
+        print(f"Error calculating position size: {e}")
+        return 0.0
+
+def place_market_order(private_client, product_id, side, amount):
+    """
+    Places a market order using the Advanced Trade SDK structure.
+    """
+    try:
+        order_config = {
+            'client_order_id': f'smc-bot-{int(time.time())}', 
+            'product_id': product_id,
+            'side': side,
+            'order_configuration': {
+                'market_market_ioc': {
+                    'base_quantity': str(amount) 
+                }
+            }
+        }
+
+        response = private_client.create_order(**order_config)
+        
+        if 'success' in response and response['success']:
+            return {'success': True, 'order_id': response.get('order_id')}
+        else:
+            return {'success': False, 'error_response': response}
+
+    except Exception as e:
+        print(f"Order placement failed: {e}")
+        send_telegram_notification(f"‼️ Order Placement Error: {e}")
+        return {'success': False, 'error_response': {'error': str(e)}}

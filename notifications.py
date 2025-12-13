@@ -1,17 +1,34 @@
-import requests
 import os
+import requests
+from dotenv import load_dotenv
 
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+# Load environment variables once at the start of the module
+load_dotenv()
 
-def send_telegram_message(message):
-    if not TELEGRAM_BOT_TOKEN or not CHAT_ID:
-        print("Telegram keys not set in environment variables. Skipping notification.")
+# --- Load Telegram Credentials ---
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN").strip()
+TELEGRAM_CHAT_ID = str(os.getenv("TELEGRAM_CHAT_ID")).strip()
+
+def send_telegram_notification(message):
+    """
+    Sends a message to the specified Telegram chat using the bot.
+    """
+    if not all([TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID]):
+        print("Telegram keys missing or not loaded. Notification not sent.")
         return
 
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
+    payload = {
+        'chat_id': TELEGRAM_CHAT_ID,
+        'text': message,
+        'parse_mode': 'Markdown'
+    }
+
     try:
-        requests.post(url, data=data)
-    except Exception as e:
-        print(f"Error sending Telegram message: {e}")
+        response = requests.post(url, data=payload, timeout=5)
+        response.raise_for_status()
+        print(f"Notification sent: {message}")
+    except requests.exceptions.RequestException as e:
+        # The 400 error is often caught here.
+        # It typically means the bot hasn't been /started by the user.
+        print(f"Failed to send Telegram notification: {response.status_code} {response.reason} for url: {url} | Details: {e}")
