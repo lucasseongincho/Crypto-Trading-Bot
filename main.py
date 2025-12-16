@@ -1,14 +1,14 @@
 ﻿import time
 import datetime as dt 
-from datetime import timezone # Required for UTC timezone
+from datetime import timezone
 from auth import public_client, private_client
 from client import public_client
 from trader import calculate_position_size, check_for_signal, place_market_order, get_usd_balance
 from notifications import send_telegram_notification
 
 # --- Configuration ---
-PRODUCT = 'ETH-USD'  # Set the product ID to Ethereum
-TRADING_INTERVAL_SECONDS = 60  # Check every 60 seconds (1 minute)
+PRODUCT = 'ETH-USD'  
+TRADING_INTERVAL_SECONDS = 60
 
 # --- Trading Logic Constants ---
 SHORT_PERIOD = 50 
@@ -41,7 +41,6 @@ def run_strategy():
             granularity='FIVE_MINUTE'
         )
         
-        # FIX: Access the candles attribute directly instead of using .get()
         raw_candles = raw_response.candles if hasattr(raw_response, 'candles') else []
 
     except Exception as e:
@@ -71,7 +70,7 @@ def run_strategy():
     # Get the trade signal based on the closing prices
     signal = check_for_signal(closes, SHORT_PERIOD, LONG_PERIOD)
     
-    # --- 3. Execute Trade (If Signal Detected) ---
+    # --- 3. Execute Trade ---
     
     if signal == 'BUY':
         print(f"Signal detected: {signal}. Checking balance and calculating position...")

@@ -1,5 +1,5 @@
 ﻿import numpy as np
-import time # <--- CRITICAL FIX: Add this import for time.time()
+import time 
 from notifications import send_telegram_notification
 
 # --- Trading Indicator Logic ---
@@ -35,19 +35,13 @@ def get_usd_balance(private_client):
     """
     try:
         accounts_response = private_client.get_accounts()
-        
-        # FIX: Use hasattr() to safely check if the 'accounts' attribute exists 
-        # on the response object before attempting to iterate.
         if hasattr(accounts_response, 'accounts') and accounts_response.accounts:
             for account in accounts_response.accounts:
                 
-                # Check for 'USD' currency
                 if account.currency == 'USD':
-                    # Access the nested value attribute
                     balance_value = account.available_balance.value
                     balance = float(balance_value)
                     
-                    # DEBUG PRINT: Print the found balance for verification
                     print(f"DEBUG: Found USD Account. Available Balance: ${balance:.2f}")
                     
                     return balance
@@ -57,7 +51,6 @@ def get_usd_balance(private_client):
         return 0.0
 
     except Exception as e:
-        # This will catch errors like missing API permissions
         print(f"ERROR fetching USD balance: {e}")
         send_telegram_notification(f"‼️ Account Read Error: {e}") 
         return None

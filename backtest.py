@@ -1,5 +1,3 @@
-# backtest.py
-
 import csv
 from strategy import generate_trade_signal
 from risk import calculate_position_size, calculate_take_profit

@@ -29,6 +29,4 @@ def send_telegram_notification(message):
         response.raise_for_status()
         print(f"Notification sent: {message}")
     except requests.exceptions.RequestException as e:
-        # The 400 error is often caught here.
-        # It typically means the bot hasn't been /started by the user.
         print(f"Failed to send Telegram notification: {response.status_code} {response.reason} for url: {url} | Details: {e}")
