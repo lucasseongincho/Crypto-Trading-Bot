@@ -4,7 +4,7 @@ import datetime as dt
 from datetime import timezone
 from client import public_client
 
-PRODUCT = 'ETH-USD'
+PRODUCT = 'SOL-USD'
 DAYS_BACK = 14 
 # Granularity in seconds (300 = 5 minutes)
 GRANULARITY_SECONDS = 300 
