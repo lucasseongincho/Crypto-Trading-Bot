@@ -1,92 +1,82 @@
 import csv
+import pandas as pd
 from strategy import generate_trade_signal
 from risk import calculate_position_size, calculate_take_profit
 
-def simulate_trade_result(signal, entry_price, sl, tp, next_candle):
-    """Simulates if SL or TP was hit first in the next candle."""
-    open_p, high_p, low_p, close_p = next_candle[1], next_candle[2], next_candle[3], next_candle[4]
-
-    if signal == 'BUY':
-        # Check if SL was hit (low price is at or below SL)
-        sl_hit = low_p <= sl
-        # Check if TP was hit (high price is at or above TP)
-        tp_hit = high_p >= tp
+def simulate_trade_outcome(signal, entry_price, sl, tp, candles, start_index):
+    """
+    Walks through future candles to see if TP or SL is hit first.
+    Returns: (exit_price, bars_held)
+    """
+    for j in range(start_index, len(candles)):
+        # Candle format: [timestamp, low, high, open, close]
+        low_p = float(candles[j][1])
+        high_p = float(candles[j][2])
+        close_p = float(candles[j][4])
         
-        if sl_hit and tp_hit:
-            # Ambiguous: Check order based on open. Assume SL hit first for conservative testing.
-            if open_p < sl: # Gap below SL
-                 return sl
-            elif open_p > tp: # Gap above TP
-                 return tp
-            return sl 
+        if signal == 'BUY':
+            if low_p <= sl: return sl, (j - start_index)
+            if high_p >= tp: return tp, (j - start_index)
+        elif signal == 'SELL':
+            if high_p >= sl: return sl, (j - start_index)
+            if low_p <= tp: return tp, (j - start_index)
             
-        elif sl_hit:
-            return sl
-        elif tp_hit:
-            return tp
-        else:
-            # Neither hit, close at market
-            return close_p 
-            
-    elif signal == 'SELL':
-        # Check if SL was hit (high price is at or above SL)
-        sl_hit = high_p >= sl
-        # Check if TP was hit (low price is at or below TP)
-        tp_hit = low_p <= tp
-        
-        if sl_hit and tp_hit:
-            # Ambiguous: Assume SL hit first for conservative testing.
-            if open_p > sl:
-                 return sl
-            elif open_p < tp:
-                 return tp
-            return sl
-            
-        elif sl_hit:
-            return sl
-        elif tp_hit:
-            return tp
-        else:
-            # Neither hit, close at market
-            return close_p
-            
-    return entry_price # Should not happen
+    # If end of data reached before exit, close at last known price
+    return float(candles[-1][4]), (len(candles) - start_index)
 
-def backtest(candles, initial_balance=1000, risk_percent=1, rr_ratio=2.0):
+def run_backtest(candles, initial_balance=1000, risk_percent=1.0):
     balance = initial_balance
     trades = []
-    
-    # Start after enough candles for indicators (e.g., 20) and ensure next candle exists (len - 1)
-    for i in range(20, len(candles) - 1): 
-        current_candles = candles[:i+1]
-        next_candle = candles[i+1]
 
-        signal, structural_price = generate_trade_signal(current_candles)
-        entry_price = current_candles[-1][4]  # close price
+    print(f"Starting Backtest with ${initial_balance}...")
+
+    # Loop through historical data
+    for i in range(50, len(candles) - 1):
+        # Current slice of history
+        history = candles[:i+1]
+        
+        # Check strategy logic
+        signal, structural_price = generate_trade_signal(history)
+        entry_price = float(history[-1][4])
 
         if signal in ['BUY', 'SELL'] and structural_price:
-            # Calculate Risk parameters
-            position_size, stop_loss = calculate_position_size(
-                balance, risk_percent, entry_price, structural_price
-            )
-            take_profit = calculate_take_profit(entry_price, structural_price, rr_ratio)
+            # Calculate Risk Math
+            pos_size, sl_price = calculate_position_size(balance, risk_percent, entry_price, structural_price)
+            tp_price = calculate_take_profit(entry_price, sl_price, 2.0)
+
+            # Simulate the "Hold" period
+            exit_price, duration = simulate_trade_outcome(signal, entry_price, sl_price, tp_price, candles, i + 1)
             
-            # --- Simulate Trade Result ---
-            exit_price = simulate_trade_result(signal, entry_price, stop_loss, take_profit, next_candle)
-            
-            pnl = 0
+            # Calculate PnL
             if signal == 'BUY':
-                pnl = position_size * (exit_price - entry_price)
-            elif signal == 'SELL':
-                pnl = position_size * (entry_price - exit_price)
+                pnl = pos_size * (exit_price - entry_price)
+            else:
+                pnl = pos_size * (entry_price - exit_price)
             
             balance += pnl
-            
             trades.append({
-                'signal': signal, 'entry': entry_price, 'stop_loss': stop_loss, 
-                'take_profit': take_profit, 'pnl': pnl, 'exit_price': exit_price
+                'Signal': signal,
+                'Entry': entry_price,
+                'Exit': exit_price,
+                'PnL': pnl,
+                'Balance': balance,
+                'Duration_Bars': duration
             })
+            
+            # Fast-forward time to skip candles where we were already in a trade
+            i += duration 
 
-    # Save results and print summary (omitted for brevity, similar to original)
-    print(f"Backtest complete: Final Balance: {balance}, Total PnL: {balance - initial_balance}")
+    # --- Performance Summary ---
+    if trades:
+        wins = [t for t in trades if t['PnL'] > 0]
+        win_rate = (len(wins) / len(trades)) * 100
+        print(f"\nBACKTEST SUMMARY")
+        print(f"----------------")
+        print(f"Total Trades: {len(trades)}")
+        print(f"Win Rate: {win_rate:.2f}%")
+        print(f"Final Balance: ${balance:.2f}")
+        print(f"Total Return: {((balance/initial_balance)-1)*100:.2f}%")
+    else:
+        print("No trades were triggered.")
+
     return trades
