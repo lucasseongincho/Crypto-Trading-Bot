@@ -112,27 +112,42 @@ def run_bot():
 
 def manage_trade(entry_price, tp1, tp2, sl, qty):
     tp1_hit = False
-    current_qty = qty
+    total_profit_usd = 0.0
+    
     while True:
         ticker = client.get_public_product(product_id=PRODUCT_ID)
         price = float(ticker['price'])
         
         if not tp1_hit:
             if price >= tp1:
-                client.market_order_sell(product_id=PRODUCT_ID, base_size=str(current_qty/2))
-                current_qty /= 2
-                trader.move_to_breakeven(client, PRODUCT_ID, current_qty, entry_price)
+                # Part 1: Sell half and calculate profit
+                sell_qty = qty / 2
+                profit_tp1 = (price - entry_price) * sell_qty
+                total_profit_usd += profit_tp1
+                
+                client.market_order_sell(product_id=PRODUCT_ID, base_size=str(sell_qty))
+                trader.move_to_breakeven(client, PRODUCT_ID, sell_qty, entry_price)
                 tp1_hit = True
-                send_telegram(f"✅ TP1 HIT! SL moved to Breakeven.")
+                
         else:
-            if price >= tp2:
-                client.market_order_sell(product_id=PRODUCT_ID, base_size=str(current_qty))
-                send_telegram(f"💰 TP2 HIT! Trade fully closed.")
+            # Check for Final Exit (TP2 or Breakeven)
+            if price >= tp2 or price <= entry_price:
+                final_profit = (price - entry_price) * (qty / 2)
+                total_profit_usd += final_profit
+                
+                # Update Journal with final numbers
+                journal.update_journal_exit(price, total_profit_usd)
+                
+                client.market_order_sell(product_id=PRODUCT_ID, base_size=str(qty/2))
+                send_telegram(f"Trade Over! Total P/L: ${total_profit_usd:.2f}")
                 break
         
-        if price <= (entry_price if tp1_hit else sl):
-            send_telegram(f"📉 Trade Closed: Hit {'Breakeven' if tp1_hit else 'Stop Loss'}")
+        # Check for Initial Stop Loss (If TP1 never hit)
+        if not tp1_hit and price <= sl:
+            loss = (price - entry_price) * qty
+            journal.update_journal_exit(price, loss)
             break
+
         time.sleep(20)
 
 if __name__ == "__main__":
