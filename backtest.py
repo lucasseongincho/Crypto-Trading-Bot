@@ -79,7 +79,7 @@ def run_backtest(candles, initial_balance=1000, risk_percent=1.0):
         wins = [t for t in trades if t['PnL'] > 0]
         win_rate = (len(wins) / len(trades)) * 100
         print("\n" + "="*40)
-        print(f"   BACKTEST RESULTS (LINK-USD)")
+        print(f"   BACKTEST RESULTS ")
         print("="*40)
         print(f"Total Trades:    {len(trades)}")
         print(f"Win Rate:        {win_rate:.2f}%")

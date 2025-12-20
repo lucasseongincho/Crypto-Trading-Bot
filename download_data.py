@@ -4,8 +4,8 @@ import datetime as dt
 from datetime import timezone
 from client import public_client
 
-PRODUCT = 'SOL-USD'
-DAYS_BACK = 14 
+PRODUCT = 'ETH-USD'
+DAYS_BACK = 100 
 # Granularity in seconds (300 = 5 minutes)
 GRANULARITY_SECONDS = 300 
 # Max candles per request allowed by Coinbase

@@ -32,6 +32,7 @@
     <Compile Include="notifications.py" />
     <Compile Include="ob_fvg.py" />
     <Compile Include="risk.py" />
+    <Compile Include="run_backtest.py" />
     <Compile Include="strategy.py" />
     <Compile Include="structure.py" />
     <Compile Include="trader.py" />
