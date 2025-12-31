@@ -2,6 +2,7 @@
 venv/
 
 # Ignore configuration and secret files
+cdp_api_key.json
 .env
 
 # Ignore Visual Studio Solution Files/Cache
