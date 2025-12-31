@@ -2,43 +2,45 @@ import csv
 import os
 from datetime import datetime
 
-FILENAME = 'trade_journal.csv'
+JOURNAL_FILE = "trade_journal.csv"
 
-def log_trade(trade_info):
-    """Records the initial entry of a trade."""
-    file_exists = os.path.isfile(FILENAME)
+def log_trade(trade_data):
+    """
+    Logs trade details with human-readable dates and advanced metrics.
+    trade_data should be a dictionary.
+    """
+    file_exists = os.path.isfile(JOURNAL_FILE)
     
-    with open(FILENAME, 'a', newline='') as f:
-        writer = csv.writer(f)
-        # Add headers if it's a brand new file
+    # Format Unix to Readable
+    entry_time = datetime.fromtimestamp(trade_data['entry_unix']).strftime('%Y-%m-%d %H:%M:%S')
+    exit_time = datetime.fromtimestamp(trade_data['exit_unix']).strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Calculate Holding Time (Minutes)
+    holding_mins = round((trade_data['exit_unix'] - trade_data['entry_unix']) / 60, 2)
+
+    fieldnames = [
+        'Entry_Date', 'Exit_Date', 'Holding_Mins', 'Pair', 'Side', 
+        'Entry_Price', 'Exit_Price', 'P/L_USD', 'MAE_USD', 'MFE_USD', 'Drawdown_Pct'
+    ]
+
+    with open(JOURNAL_FILE, mode='a', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        
         if not file_exists:
-            writer.writerow(['Timestamp', 'Side', 'Product', 'Size', 'Entry', 'SL', 'TP2', 'Exit_Price', 'Profit_USD'])
-            
-        writer.writerow([
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            trade_info['side'],
-            trade_info['product'],
-            trade_info['size'],
-            trade_info['entry_price'],
-            trade_info['stop_loss'],
-            trade_info['take_profit'],
-            "OPEN", # Exit Price placeholder
-            "0.00"  # Profit placeholder
-        ])
+            writer.writeheader()
 
-def update_journal_exit(exit_price, profit_usd):
-    """Updates the last row in the journal with the final results."""
-    rows = []
-    if not os.path.isfile(FILENAME): return
+        writer.writerow({
+            'Entry_Date': entry_time,
+            'Exit_Date': exit_time,
+            'Holding_Mins': holding_mins,
+            'Pair': trade_data['pair'],
+            'Side': trade_data['side'],
+            'Entry_Price': trade_data['entry_price'],
+            'Exit_Price': trade_data['exit_price'],
+            'P/L_USD': trade_data['pnl'],
+            'MAE_USD': trade_data.get('mae', 0), # Max loss during trade
+            'MFE_USD': trade_data.get('mfe', 0), # Max profit during trade
+            'Drawdown_Pct': trade_data.get('drawdown', 0)
+        })
 
-    with open(FILENAME, 'r') as f:
-        rows = list(csv.reader(f))
-
-    if len(rows) > 1:
-        # Update the last row's Exit Price and Profit columns
-        rows[-1][7] = f"{exit_price:.2f}"
-        rows[-1][8] = f"{profit_usd:.2f}"
-
-    with open(FILENAME, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerows(rows)
+print("Journal system updated with Readable Dates and Metrics.")
