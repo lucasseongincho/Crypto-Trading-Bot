@@ -28,7 +28,6 @@ def calculate_performance(journal_file="trade_journal.csv"):
         profit_factor = abs(winning_trades['P/L_USD'].sum() / losing_trades['P/L_USD'].sum()) if not losing_trades.empty else float('inf')
         
         # 3. Drawdown Calculation
-        # We assume a starting balance of 1000 if not tracked, or we can calculate equity curve
         initial_balance = 1000
         df['Equity'] = initial_balance + df['P/L_USD'].cumsum()
         peak = df['Equity'].cummax()
