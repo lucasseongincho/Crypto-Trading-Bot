@@ -44,10 +44,21 @@ Process the CSV through the simulation engine. This sorts data chronologically a
 ```bash
 python run_backtest.py --file ETH-USD_candles.csv
 ```
-### 3. Generate Performance Report
+### 3. Generate Performance Report of the lastest file
 Analyze the journal to see win rate, profit factor, and drawdowns.
 ```bash
-python performance_summary.py
+python performance_summary.py --coin ETH
+```
+
+## 📄 How to Run Paper testing
+Follow these steps to verify the strategy against live data using fake money.
+
+### 1. Paper Mode Setting
+Set PAPER_MODE = True in main.py
+
+### 2. Run main.py
+```bash
+python main.py
 ```
 
 ## 📊 Outcome So Far (One-Year Test)
@@ -58,15 +69,15 @@ During this period, the Ethereum market was in a consistent downtrend. While a p
 
 | Metric | Buy & Hold (The Market) | SMC Trading Bot (Our Bot) |
 | :--- | :--- | :--- |
-| **Price Movement** | $3,411.52 → $2,970.33 | **$1,000.00 → $1,267.45** |
-| **Total Return** | -12.93% (Loss) | **+26.75% (Profit)** |
-| **Max Drawdown** | ~ -30.00% | **-15.87%** |
-| **Final Equity** | $870.70 | **$1,267.45** |
-| **Performance Gap** | Baseline | **+39.68% Over Market** |
+| **Price Movement** | $3,411.52 → $2,970.33 | $3,411.52 → $2,970.33 |
+| **Total Return** | -12.93% (Loss) | **+168.605% (Profit)** |
+| **Max Drawdown** | ~ -30.00% | **-21.56%** |
+| **Final Equity** | $870.70 | **$2686.05** |
+| **Performance Gap** | Baseline | **+181.535% Over Market** |
 
 ### Key Performance Highlights
-* **Bear Market Alpha:** The bot generated a **+26.75%** return while the underlying asset fell by nearly 13%.
-* **Superior Risk Management:** The bot achieved these gains with a Maximum Drawdown of only **15.87%**, significantly lower than the volatility experienced by holding the asset.
+* **Bear Market Alpha:** The bot generated a **+168.605%** return while the underlying asset fell by nearly 13%.
+* **Superior Risk Management:** The bot achieved these gains with a Maximum Drawdown of only **21.56%**, significantly lower than the volatility experienced by holding the asset.
 * **Short-Selling Success:** Profits were largely driven by the bot's ability to "Short" the market during structural shifts and FVG fills in a declining environment.
 
 ## 📈 Upcoming Features
