@@ -70,6 +70,4 @@ During this period, the Ethereum market was in a consistent downtrend. While a p
 * **Short-Selling Success:** Profits were largely driven by the bot's ability to "Short" the market during structural shifts and FVG fills in a declining environment.
 
 ## 📈 Upcoming Features
-* [ ] **Backtesting Journal:** Tracking dates, entry/exit costs, and drawdown.
-* [ ] **Flexible Data Downloader:** Custom date ranges for historical analysis.
 * [ ] **AWS Deployment:** Moving to an EC2 instance for 24/7 uptime.
