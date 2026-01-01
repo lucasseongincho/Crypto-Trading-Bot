@@ -31,6 +31,7 @@
     <Compile Include="main.py" />
     <Compile Include="notifications.py" />
     <Compile Include="ob_fvg.py" />
+    <Compile Include="performance_summary.py" />
     <Compile Include="risk.py" />
     <Compile Include="run_backtest.py" />
     <Compile Include="strategy.py" />

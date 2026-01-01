@@ -23,11 +23,8 @@ def main():
     print(f"📂 Loading data from {args.file}...")
     df = pd.read_csv(args.file)
 
-    # --- THE CRITICAL FIX ---
-    # We must assign the sorted result back to 'df' 
-    # and use 'inplace=True' or 'df = ...'
     if 'start' in df.columns:
-        df['start'] = pd.to_numeric(df['start']) # Ensure timestamps are numbers
+        df['start'] = pd.to_numeric(df['start'])
         df = df.sort_values(by='start', ascending=True).reset_index(drop=True)
         print("✅ Data sorted chronologically (Oldest to Newest).")
     elif 'timestamp' in df.columns:
