@@ -50,6 +50,17 @@ Analyze the journal to see win rate, profit factor, and drawdowns.
 python performance_summary.py --coin ETH
 ```
 
+## 📄 How to Run Paper testing
+Follow these steps to verify the strategy against live data using fake money.
+
+### 1. Paper Mode Setting
+Set PAPER_MODE = True in main.py
+
+### 2. Run main.py
+```bash
+python main.py
+```
+
 ## 📊 Outcome So Far (One-Year Test)
 
 **Period:** Jan 2, 2025 – Dec 31, 2025 | **Pair:** ETH-USD | **Initial Balance:** $1,000
