@@ -1,11 +1,11 @@
-﻿import pandas as pd
-import argparse
+﻿import argparse
 import os
+import pandas as pd
 from backtest import run_backtest
 
 def main():
     # 1. Setup Command Line Arguments
-    parser = argparse.ArgumentParser(description="Run Trading Bot Backtest")
+    parser = argparse.ArgumentParser(description="Universal SMC Strategy Backtest")
     parser.add_argument(
         "--file", 
         type=str, 
@@ -19,10 +19,16 @@ def main():
         print(f"❌ Error: Could not find file '{args.file}'")
         return
 
-    # 3. Load the data
-    print(f"📂 Loading data from {args.file}...")
+    # --- 3. UNIVERSAL ASSET DETECTION ---
+    # Example: "XRP-USD_candles.csv" -> "XRP-USD"
+    # We strip the path and take the first part of the filename before the underscore
+    base_name = os.path.basename(args.file).replace(".csv", "")
+    pair = base_name.split('_')[0].upper() 
+    
+    print(f"📂 Loading data for: {pair} from {args.file}...")
     df = pd.read_csv(args.file)
 
+    # 4. Sorting logic
     if 'start' in df.columns:
         df['start'] = pd.to_numeric(df['start'])
         df = df.sort_values(by='start', ascending=True).reset_index(drop=True)
@@ -32,28 +38,37 @@ def main():
         df = df.sort_values(by='timestamp', ascending=True).reset_index(drop=True)
         print("✅ Data sorted chronologically by timestamp.")
 
-    # 4. Convert Rows to Dictionaries
-    candle_list = []
+    # 5. Column Mapping & Optimization
+    print("⚡ Converting data to optimized format...")
+    column_mapping = {
+        'timestamp': 'start', 'time': 'start',
+        'price_low': 'low', 'price_high': 'high',
+        'price_open': 'open', 'price_close': 'close',
+        'base_volume': 'volume'
+    }
+    df = df.rename(columns=column_mapping)
     
-    if list(df.columns) == ['0']:
-        print("❌ Error: The CSV file has no headers.")
-        return
+    # Check for required columns and filter
+    required_cols = ['start', 'low', 'high', 'open', 'close']
+    available_cols = [col for col in required_cols if col in df.columns]
+    candle_list = df[available_cols].to_dict('records')
 
-    for _, row in df.iterrows():
-        candle_list.append({
-            'start': row.get('start', row.get('timestamp', row.get('time'))),
-            'low': float(row.get('low', row.get('price_low'))),
-            'high': float(row.get('high', row.get('price_high'))),
-            'open': float(row.get('open', row.get('price_open'))),
-            'close': float(row.get('close', row.get('price_close'))),
-            'volume': float(row.get('volume', row.get('base_volume')))
-        })
-
-    # 5. Run the Backtest
-    print(f"🚀 Starting simulation on {len(candle_list)} candles...")
-    trades = run_backtest(candle_list, initial_balance=1000, risk_percent=1.0)
+    # 6. Run the Universal Backtest
+    print(f"🚀 Starting simulation on {len(candle_list)} candles for {pair}...")
     
-    print("✅ Backtest complete. Check trade_journal.csv for details.")
+    # We now pass the 'pair' so backtest.py can create the correct filename
+    trades, final_report_name = run_backtest(
+        candle_list, 
+        product_id=pair, 
+        initial_balance=1000, 
+        risk_percent=1.0
+    )
+
+    print("-" * 30)
+    print(f"✅ Backtest complete for {pair}!")
+    print(f"📄 Full trade log saved to: {final_report_name}")
+    print(f"💡 Run 'python performance_summary.py' to see the detailed report.")
+    print("-" * 30)
 
 if __name__ == "__main__":
     main()

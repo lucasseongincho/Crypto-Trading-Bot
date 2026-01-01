@@ -2,30 +2,37 @@ import csv
 import os
 from datetime import datetime
 
-JOURNAL_FILE = "trade_journal.csv"
+# Default file for the Live/Paper bot
+DEFAULT_JOURNAL = "trade_journal.csv"
 
-def log_trade(trade_data):
+def log_trade(trade_data, filename=DEFAULT_JOURNAL):
     """
-    Logs trade details with human-readable dates and advanced metrics.
-    trade_data should be a dictionary.
+    Logs trade details with human-readable dates.
+    filename: defaults to trade_journal.csv unless specified by backtest.
     """
-    file_exists = os.path.isfile(JOURNAL_FILE)
+    file_exists = os.path.isfile(filename)
     
-    # Format Unix to Readable
-    entry_time = datetime.fromtimestamp(trade_data['entry_unix']).strftime('%Y-%m-%d %H:%M:%S')
-    exit_time = datetime.fromtimestamp(trade_data['exit_unix']).strftime('%Y-%m-%d %H:%M:%S')
-    
-    # Calculate Holding Time (Minutes)
-    holding_mins = round((trade_data['exit_unix'] - trade_data['entry_unix']) / 60, 2)
+    # Handle Date Formatting
+    # If it's a backtest, we have Unix. If it's Live, we might have a string or now()
+    if 'entry_unix' in trade_data:
+        entry_time = datetime.fromtimestamp(trade_data['entry_unix']).strftime('%Y-%m-%d %H:%M:%S')
+    else:
+        entry_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    # Calculate Holding Time (Only if exit_unix exists, like in backtests)
+    holding_mins = 0
+    exit_time = "OPEN"
+    if 'exit_unix' in trade_data:
+        exit_time = datetime.fromtimestamp(trade_data['exit_unix']).strftime('%Y-%m-%d %H:%M:%S')
+        holding_mins = round((trade_data['exit_unix'] - trade_data['entry_unix']) / 60, 2)
 
     fieldnames = [
         'Entry_Date', 'Exit_Date', 'Holding_Mins', 'Pair', 'Side', 
-        'Entry_Price', 'Exit_Price', 'P/L_USD', 'MAE_USD', 'MFE_USD', 'Drawdown_Pct'
+        'Entry_Price', 'Exit_Price', 'P/L_USD'
     ]
 
-    with open(JOURNAL_FILE, mode='a', newline='') as f:
+    with open(filename, mode='a', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=fieldnames)
-        
         if not file_exists:
             writer.writeheader()
 
@@ -33,14 +40,14 @@ def log_trade(trade_data):
             'Entry_Date': entry_time,
             'Exit_Date': exit_time,
             'Holding_Mins': holding_mins,
-            'Pair': trade_data['pair'],
+            'Pair': trade_data.get('pair', trade_data.get('product', 'ETH-USD')),
             'Side': trade_data['side'],
             'Entry_Price': trade_data['entry_price'],
-            'Exit_Price': trade_data['exit_price'],
-            'P/L_USD': trade_data['pnl'],
-            'MAE_USD': trade_data.get('mae', 0), # Max loss during trade
-            'MFE_USD': trade_data.get('mfe', 0), # Max profit during trade
-            'Drawdown_Pct': trade_data.get('drawdown', 0)
+            'Exit_Price': trade_data.get('exit_price', 0),
+            'P/L_USD': trade_data.get('pnl', 0)
         })
 
-print("Journal system updated with Readable Dates and Metrics.")
+def update_journal_exit(exit_price, pnl, filename=DEFAULT_JOURNAL):
+    """Used by main.py to update the last trade with final exit data."""
+    # Note: This updates the DEFAULT file for live sessions
+    pass

@@ -1,4 +1,5 @@
 ﻿import csv
+from datetime import datetime
 from strategy import generate_trade_signal
 from risk import calculate_position_size, calculate_take_profit
 from journal import log_trade 
@@ -41,46 +42,46 @@ def simulate_trade_outcome(signal, entry_price, sl, tp2, candles, start_index):
                 
     return pnl_accumulated, (len(candles) - start_index)
 
-def run_backtest(candles, initial_balance=1000, risk_percent=1.0):
+def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
     balance = initial_balance
     trades = []
     
-    # Ensure we have enough data for the first signal
+    # Extract the base asset (e.g., "SOL" from "SOL-USD")
+    asset_name = product_id.split('-')[0] 
+
+    # --- Generate Universal Filename ---
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M")
+    report_filename = f"trade_journal_{asset_name}_{timestamp}.csv"
+
     i = 50 
     while i < len(candles) - 1:
-        history = candles[:i+1]
-        signal, structural_price = generate_trade_signal(history)
-        entry_price = float(history[i]['close'])
+        signal, structural_price, _ = generate_trade_signal(candles, i)
+        entry_price = float(candles[i]['close'])
 
         if signal in ['BUY', 'SELL'] and structural_price:
             pos_size, sl_price = calculate_position_size(balance, risk_percent, entry_price, structural_price)
             tp2_price = calculate_take_profit(entry_price, sl_price, 2.0)
 
-            # --- Inside run_backtest in backtest.py ---
-            total_pnl_per_unit, duration = simulate_trade_outcome(signal, entry_price, sl_price, tp2_price, candles, i + 1)
-            
-            actual_pnl = pos_size * total_pnl_per_unit
+            # (Assume simulate_trade_outcome is defined below)
+            res_pnl_unit, duration = simulate_trade_outcome(signal, entry_price, sl_price, tp2_price, candles, i + 1)
+        
+            actual_pnl = pos_size * res_pnl_unit
             balance += actual_pnl
-            
-            # Use max() to ensure exit_idx is always at least i+1
             exit_idx = min(i + max(1, duration), len(candles) - 1)
-            
+        
             log_trade({
                 'entry_unix': candles[i]['start'],
                 'exit_unix': candles[exit_idx]['start'],
-                'pair': 'ETH-USD', # Consider changing this to a variable later
+                'pair': product_id,
                 'side': signal,
                 'entry_price': entry_price,
                 'exit_price': float(candles[exit_idx]['close']),
                 'pnl': round(actual_pnl, 2)
-            })
+            }, filename=report_filename)
             
             trades.append({'Signal': signal, 'PnL': actual_pnl, 'Balance': balance})
-            
-            # Jump forward in time to the bar after the exit
             i += (duration + 1)
         else:
             i += 1
 
-    # Final Summary code here...
-    return trades
+    return trades, report_filename
