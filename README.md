@@ -44,10 +44,10 @@ Process the CSV through the simulation engine. This sorts data chronologically a
 ```bash
 python run_backtest.py --file ETH-USD_candles.csv
 ```
-### 3. Generate Performance Report
+### 3. Generate Performance Report of the lastest file
 Analyze the journal to see win rate, profit factor, and drawdowns.
 ```bash
-python performance_summary.py
+python performance_summary.py --coin ETH
 ```
 
 ## 📊 Outcome So Far (One-Year Test)
