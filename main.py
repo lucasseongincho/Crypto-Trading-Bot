@@ -64,18 +64,15 @@ def run_bot():
     while True:
         try:
             # --- 1. TIMING SYNC ---
-            # Checks if we are at the start of a 5-minute candle
             current_time = time.time()
             seconds_into_candle = int(current_time) % 300
             
-            # If we missed the first 10 seconds, wait for the next candle
             if seconds_into_candle > 10:
                 wait_time = 300 - seconds_into_candle + 1
                 print(f"⏳ Waiting {wait_time}s for next candle close...")
                 time.sleep(wait_time)
 
             # --- 2. FETCH DATA ---
-            # Fetch 300 candles to ensure enough data for indicators
             end_ts = int(time.time())
             start_ts = end_ts - (300 * 300)
             
@@ -93,7 +90,6 @@ def run_bot():
                 continue
 
             # --- 3. GENERATE SIGNAL & HEARTBEAT ---
-            # Note: strategy.py must return (signal, price, counts)
             signal, structural_price, counts = generate_trade_signal(candles, len(candles) - 1)
             
             ts = datetime.now().strftime('%H:%M:%S')
@@ -107,18 +103,22 @@ def run_bot():
                 ticker = client.get_public_product(product_id=PRODUCT_ID)
                 entry_price = float(ticker['price'])
                 
-                pos_size_usd, sl_price = calculate_position_size(BALANCE, RISK_PCT, entry_price, structural_price)
+                # FIX: Explicitly convert structural_price to float to avoid math errors
+                sl_target = float(structural_price)
+                
+                # Position sizing and targets
+                pos_size_usd, sl_price = calculate_position_size(BALANCE, RISK_PCT, entry_price, sl_target)
                 tp2 = calculate_take_profit(entry_price, sl_price, 2.0)
                 tp1 = entry_price + abs(entry_price - sl_price)
 
-                print(f"🎯 {signal} Signal Found! Entry: {entry_price}")
+                print(f"🎯 {signal} Signal Found! Entry: {entry_price} | SL: {sl_price} | TP2: {tp2}")
                 
                 if PAPER_MODE:
                     qty = pos_size_usd / entry_price
                     send_telegram(f"📝 PAPER ORDER: {signal} {qty:.4f} ETH at {entry_price}")
                     journal.log_trade({
-                        'side': signal, 'product': PRODUCT_ID, 'size': qty, 
-                        'entry_price': entry_price, 'stop_loss': sl_price, 'take_profit': tp2
+                        'side': signal, 'pair': PRODUCT_ID, 'entry_price': entry_price, 
+                        'exit_price': 0, 'pnl': 0, 'entry_unix': time.time()
                     })
                     manage_trade(entry_price, tp1, tp2, sl_price, qty)
                 else:
@@ -126,48 +126,59 @@ def run_bot():
                     if order:
                         qty = float(order['base_size'])
                         journal.log_trade({
-                            'side': signal, 'product': PRODUCT_ID, 'size': qty, 
-                            'entry_price': entry_price, 'stop_loss': sl_price, 'take_profit': tp2
+                            'side': signal, 'pair': PRODUCT_ID, 'entry_price': entry_price, 
+                            'entry_unix': time.time()
                         })
                         trader.place_initial_stop_loss(client, PRODUCT_ID, qty, sl_price)
                         manage_trade(entry_price, tp1, tp2, sl_price, qty)
                         BALANCE = get_coinbase_balance(client)
 
             # --- 5. COOL DOWN ---
-            # Prevents rapid looping within the same second
             time.sleep(15)
 
         except Exception as e:
             print(f"❌ Critical Error: {e}")
+            # If a connection reset happens, wait a bit longer before retry
             time.sleep(60)
 
-def manage_trade(entry_price, tp1, tp2, sl, qty):
+def manage_trade(entry, tp1, tp2, sl, qty):
+    # Ensure all inputs are treated as floats
+    entry, tp1, tp2, sl, qty = map(float, [entry, tp1, tp2, sl, qty])
     tp1_hit = False
     print(f"🛰️ Monitoring Open Trade...")
+    
     while True:
         try:
             ticker = client.get_public_product(product_id=PRODUCT_ID)
             price = float(ticker['price'])
             
-            if not tp1_hit:
-                if (price >= tp1):
-                    if not PAPER_MODE:
-                        client.market_order_sell(product_id=PRODUCT_ID, base_size=str(qty / 2))
-                        trader.move_to_breakeven(client, PRODUCT_ID, qty / 2, entry_price)
-                    send_telegram(f"💰 TP1 Hit! Profit booked, SL moved to Breakeven.")
-                    tp1_hit = True
-                elif (price <= sl):
-                    journal.update_journal_exit(price, (price - entry_price) * qty)
-                    send_telegram(f"🛑 SL Hit at {price}.")
-                    break
-            else:
-                if price >= tp2 or price <= entry_price:
-                    if not PAPER_MODE:
-                        client.market_order_sell(product_id=PRODUCT_ID, base_size=str(qty / 2))
-                    total_pnl = (price - entry_price) * (qty / 2) + (tp1 - entry_price) * (qty / 2)
-                    journal.update_journal_exit(price, total_pnl)
-                    send_telegram(f"🏁 Trade Closed. P/L: ${total_pnl:.2f}")
-                    break
+            # Logic for BUY trades
+            if entry < tp2: 
+                if not tp1_hit:
+                    if price >= tp1:
+                        print(f"💰 TP1 Hit! Moving SL to Breakeven.")
+                        tp1_hit = True
+                    elif price <= sl:
+                        print(f"🛑 SL Hit.")
+                        break
+                else:
+                    if price >= tp2 or price <= entry:
+                        print(f"🏁 Trade Closed.")
+                        break
+            # Logic for SELL trades
+            else: 
+                if not tp1_hit:
+                    if price <= tp1:
+                        print(f"💰 TP1 Hit! Moving SL to Breakeven.")
+                        tp1_hit = True
+                    elif price >= sl:
+                        print(f"🛑 SL Hit.")
+                        break
+                else:
+                    if price <= tp2 or price >= entry:
+                        print(f"🏁 Trade Closed.")
+                        break
+                        
             time.sleep(20)
         except Exception as e:
             print(f"Trade Mgmt Error: {e}")
