@@ -54,7 +54,7 @@ python performance_summary.py --coin ETH
 Follow these steps to verify the strategy against live data using fake money.
 
 ### 1. Paper Mode Setting
-Set PAPER_MODE = True in main.py
+Set "PAPER_MODE = True" in main.py
 
 ### 2. Run main.py
 ```bash
