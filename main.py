@@ -102,14 +102,15 @@ def run_bot():
             if signal in ['BUY', 'SELL'] and structural_price:
                 ticker = client.get_public_product(product_id=PRODUCT_ID)
                 entry_price = float(ticker['price'])
-                
-                # FIX: Explicitly convert structural_price to float to avoid math errors
                 sl_target = float(structural_price)
                 
-                # Position sizing and targets
-                pos_size_usd, sl_price = calculate_position_size(BALANCE, RISK_PCT, entry_price, sl_target)
-                tp2 = calculate_take_profit(entry_price, sl_price, 2.0)
-                tp1 = entry_price + abs(entry_price - sl_price)
+                # NEW: Pass 'signal' (BUY/SELL) to the risk functions
+                pos_size_usd, sl_price = calculate_position_size(
+                    BALANCE, RISK_PCT, entry_price, sl_target, signal
+                )
+                
+                tp2 = calculate_take_profit(entry_price, sl_price, signal, 2.0)
+                tp1 = calculate_take_profit(entry_price, sl_price, signal, 1.0) # TP1 is 1:1
 
                 print(f"🎯 {signal} Signal Found! Entry: {entry_price} | SL: {sl_price} | TP2: {tp2}")
                 

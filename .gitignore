@@ -8,6 +8,7 @@ cdp_api_key.json
 # Ignore Visual Studio Solution Files/Cache
 .vs/
 *.vsidx
+*.csv
 
 # Ignore cached files and compiled code
 __pycache__/

@@ -26,7 +26,7 @@ Read the files in this order to understand the logic flow:
 ### 3. Environment Setup
 To run the bot locally, you will need:
 * **Python 3.10+**
-* **Virtual Environment:** `python -m venv venv`
+* **Virtual Environment:** `python -m venv venv` then `venv\Scripts\activate`
 * **API Credentials:**
     * `cdp_api_key.json`: Your Coinbase CDP keys - You can download it from Coinbase when you make an account.
     * `.env`: Your `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
