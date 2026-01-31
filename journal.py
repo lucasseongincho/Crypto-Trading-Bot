@@ -2,52 +2,51 @@ import csv
 import os
 from datetime import datetime
 
-# Default file for the Live/Paper bot
-DEFAULT_JOURNAL = "trade_journal.csv"
-
-def log_trade(trade_data, filename=DEFAULT_JOURNAL):
+def log_trade(trade_data, filename="trade_journal.csv"):
     """
-    Logs trade details with human-readable dates.
-    filename: defaults to trade_journal.csv unless specified by backtest.
+    Appends a new trade record to the CSV journal. 
+    Includes TP1, TP2, and SL prices for better debugging.
     """
-    file_exists = os.path.isfile(filename)
     
-    # Handle Date Formatting
-    # If it's a backtest, we have Unix. If it's Live, we might have a string or now()
-    if 'entry_unix' in trade_data:
-        entry_time = datetime.fromtimestamp(trade_data['entry_unix']).strftime('%Y-%m-%d %H:%M:%S')
-    else:
-        entry_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    # 1. Format the Date and Time from Unix timestamps
+    try:
+        entry_date = datetime.fromtimestamp(trade_data['entry_unix']).strftime('%Y/%m/%d %H:%M')
+        exit_date = datetime.fromtimestamp(trade_data['exit_unix']).strftime('%Y/%m/%d %H:%M')
+        # Calculate duration in minutes
+        duration_mins = int((trade_data['exit_unix'] - trade_data['entry_unix']) / 60)
+    except Exception:
+        entry_date = "N/A"
+        exit_date = "N/A"
+        duration_mins = 0
 
-    # Calculate Holding Time (Only if exit_unix exists, like in backtests)
-    holding_mins = 0
-    exit_time = "OPEN"
-    if 'exit_unix' in trade_data:
-        exit_time = datetime.fromtimestamp(trade_data['exit_unix']).strftime('%Y-%m-%d %H:%M:%S')
-        holding_mins = round((trade_data['exit_unix'] - trade_data['entry_unix']) / 60, 2)
-
-    fieldnames = [
-        'Entry_Date', 'Exit_Date', 'Holding_Mins', 'Pair', 'Side', 
-        'Entry_Price', 'Exit_Price', 'P/L_USD'
+    # 2. Define the Columns (The Row)
+    # We round to 2 decimals for clean data
+    row = [
+        entry_date,                             # Column 1: Entry Time
+        exit_date,                              # Column 2: Exit Time
+        duration_mins,                          # Column 3: Hold Time (Min)
+        trade_data.get('pair', 'N/A'),          # Column 4: Ticker
+        trade_data.get('side', 'N/A'),          # Column 5: BUY/SELL
+        round(trade_data['entry_price'], 2),    # Column 6: Entry Price
+        round(trade_data['exit_price'], 2),     # Column 7: Final Exit Price
+        round(trade_data['tp1_price'], 2),      # Column 8: TP1 Target
+        round(trade_data['tp2_price'], 2),      # Column 9: TP2 Target
+        round(trade_data['sl_price'], 2),       # Column 10: Initial Stop Loss
+        round(trade_data['pnl'], 2)             # Column 11: Total P/L USD
     ]
 
-    with open(filename, mode='a', newline='') as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
+    # 3. Check if file exists to determine if we need a header
+    file_exists = os.path.isfile(filename)
+
+    # 4. Write to CSV
+    with open(filename, 'a', newline='') as f:
+        writer = csv.writer(f)
+        
+        # If the file is new, add the header first
         if not file_exists:
-            writer.writeheader()
-
-        writer.writerow({
-            'Entry_Date': entry_time,
-            'Exit_Date': exit_time,
-            'Holding_Mins': holding_mins,
-            'Pair': trade_data.get('pair', trade_data.get('product', 'ETH-USD')),
-            'Side': trade_data['side'],
-            'Entry_Price': trade_data['entry_price'],
-            'Exit_Price': trade_data.get('exit_price', 0),
-            'P/L_USD': trade_data.get('pnl', 0)
-        })
-
-def update_journal_exit(exit_price, pnl, filename=DEFAULT_JOURNAL):
-    """Used by main.py to update the last trade with final exit data."""
-    # Note: This updates the DEFAULT file for live sessions
-    pass
+            writer.writerow([
+                'Entry_Date', 'Exit_Date', 'Holding_M', 'Pair', 'Side', 
+                'Entry_Price', 'Exit_Price', 'TP1_Price', 'TP2_Price', 'SL_Price', 'P/L_USD'
+            ])
+            
+        writer.writerow(row)
