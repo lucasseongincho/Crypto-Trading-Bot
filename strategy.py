@@ -28,6 +28,7 @@ def generate_trade_signal(candles, current_idx):
     # --- Bullish Confirmation Logic ---
     if ob_list and ob_list[-1]['type']=='bullish': 
         bullish_signals += 1
+        # FIX: For a BUY, the SL must be BELOW entry (Order Block LOW)
         structural_price = ob_list[-1]['low']
         
     if fvg_list and fvg_list[-1]['type']=='bullish': bullish_signals += 1
@@ -37,13 +38,14 @@ def generate_trade_signal(candles, current_idx):
     # --- Bearish Confirmation Logic ---
     if ob_list and ob_list[-1]['type']=='bearish': 
         bearish_signals += 1
+        # FIX: For a SELL, the SL must be ABOVE entry (Order Block HIGH)
         structural_price = ob_list[-1]['high']
         
     if fvg_list and fvg_list[-1]['type']=='bearish': bearish_signals += 1
     if trend == 'DOWNTREND': bearish_signals += 1
     if fakeout == 'BEAR_FAKEOUT': bearish_signals += 1
 
-    # New: Dictionary for the Heartbeat display in main.py
+    # Dictionary for the Heartbeat display in main.py
     counts = {
         'bull': bullish_signals,
         'bear': bearish_signals,
