@@ -10,7 +10,7 @@ def simulate_trade_outcome(signal, entry_price, sl, tp2, candles, start_index):
     Returns: (total_pnl_units, bars_held, avg_exit_price)
     """
     risk_amount = abs(entry_price - sl)
-    # TP1 is a 1:1 Risk/Reward move
+    # TP1 remains a 1:1 Risk/Reward move to lock in some profit
     tp1 = entry_price + (risk_amount if signal == 'BUY' else -risk_amount)
     
     current_sl = sl
@@ -24,24 +24,24 @@ def simulate_trade_outcome(signal, entry_price, sl, tp2, candles, start_index):
         bars_held = j - (start_index - 1)
 
         if not tp1_hit:
-            # Check Stop Loss
+            # 1. Check Stop Loss
             if (signal == 'BUY' and low_p <= current_sl) or (signal == 'SELL' and high_p >= current_sl):
                 final_exit_price = current_sl
                 return (current_sl - entry_price if signal == 'BUY' else entry_price - current_sl), bars_held, final_exit_price
 
-            # Check TP1 (Scale out 50%)
+            # 2. Check TP1 (Scale out 50%)
             if (signal == 'BUY' and high_p >= tp1) or (signal == 'SELL' and low_p <= tp1):
                 tp1_hit = True
                 pnl_accumulated += 0.5 * (tp1 - entry_price if signal == 'BUY' else entry_price - tp1)
-                current_sl = entry_price # Move remaining 50% to Breakeven
+                current_sl = entry_price # MOVE TO BREAKEVEN
         else:
-            # Check TP2 (Exit remaining 50%)
+            # 3. Check TP2 (Exit remaining 50% at 1:3 RR)
             if (signal == 'BUY' and high_p >= tp2) or (signal == 'SELL' and low_p <= tp2):
                 pnl_accumulated += 0.5 * (tp2 - entry_price if signal == 'BUY' else entry_price - tp2)
                 avg_exit = (tp1 + tp2) / 2
                 return pnl_accumulated, bars_held, avg_exit
 
-            # Check Breakeven Stop
+            # 4. Check Breakeven Stop
             if (signal == 'BUY' and low_p <= current_sl) or (signal == 'SELL' and high_p >= current_sl):
                 avg_exit = (tp1 + entry_price) / 2
                 return pnl_accumulated, bars_held, avg_exit
@@ -53,42 +53,40 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
     trades = []
     
     asset_name = product_id.split('-')[0] 
-    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M")
+    # Added seconds (%S) to ensure a fresh file every time you run
+    timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     report_filename = f"trade_journal_{asset_name}_{timestamp}.csv"
 
-    # We need at least 48 candles for a 4-hour trend check (48 * 5m = 4h)
-    # plus the 100-candle lookback for SMC logic.
+    # Start after lookback period
     i = 150 
     
     while i < len(candles) - 1:
-        # --- FIX: Create Mock HTF Data from 5m Candles ---
-        # 5m window for entry logic
+        # 1. Prepare Data Windows
         candles_5m = candles[i-100:i+1]
+        candles_htf = candles[i-48:i+1] # 4-Hour Trend Window
         
-        # 4h window for trend bias (approx. last 48 candles)
-        # We take the current price and compare it to the price 48 bars ago
-        candles_htf = candles[i-48:i+1]
-        
-        # Call strategy with two arguments instead of (candles, i)
+        # 2. Get Signal (Respects HTF Filter and FVG Mandatory Check)
         signal, structural_price, counts = generate_trade_signal(candles_5m, candles_htf)
         
-        entry_price = float(candles[i]['close'])
-
+        # --- THE FIX: Strictly check for active signals only ---
         if signal in ['BUY', 'SELL'] and structural_price:
-            # 1. Calculate Targets
+            entry_price = float(candles[i]['close'])
+
+            # 3. Risk Assessment
             pos_size, sl_price = calculate_position_size(
                 balance, risk_percent, entry_price, float(structural_price), signal
             )
             
-            # Safety Check: If position size is 0 (failed min distance/logic), skip
+            # Skip if Risk logic rejects (e.g., SL too tight)
             if pos_size <= 0:
                 i += 1
                 continue
 
+            # 4. Targets (SNIPER 1:3 RR)
             tp1_price = calculate_take_profit(entry_price, sl_price, signal, 1.0)
-            tp2_price = calculate_take_profit(entry_price, sl_price, signal, 2.0)
+            tp2_price = calculate_take_profit(entry_price, sl_price, signal, 3.0) 
 
-            # 2. Simulate
+            # 5. Simulation
             res_pnl_unit, duration, avg_exit = simulate_trade_outcome(
                 signal, entry_price, sl_price, tp2_price, candles, i + 1
             )
@@ -97,7 +95,7 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
             balance += actual_pnl
             exit_idx = min(i + max(1, duration), len(candles) - 1)
         
-            # 3. Log Trade
+            # 6. Logging
             log_trade({
                 'entry_unix': candles[i]['start'],
                 'exit_unix': candles[exit_idx]['start'],
@@ -112,8 +110,11 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
             }, filename=report_filename)
             
             trades.append({'Signal': signal, 'PnL': actual_pnl, 'Balance': balance})
+            
+            # Jump forward past the trade duration
             i += (duration + 1)
         else:
+            # No signal or blocked signal
             i += 1
 
     return trades, report_filename
