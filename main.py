@@ -18,7 +18,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 # --- 2. CONFIGURATION ---
 PAPER_MODE = True  
-PRODUCT_ID = "ETH-USD"
+PRODUCT_ID = "BTC-USD"  # Updated to BTC based on your backtest
 BALANCE = 1000.0 if PAPER_MODE else 0.0 
 RISK_PCT = 1.0  
 LOOKBACK_WINDOW = 100 
@@ -48,7 +48,7 @@ def manage_trade(entry, tp1, tp2, sl, qty, side, entry_unix):
     tp1_hit = False
     final_exit_price = entry
     
-    status_msg = f"🛰️ Trade Active: {side} {qty:.4f} ETH | Entry: {entry} | SL: {sl}"
+    status_msg = f"🛰️ Trade Active: {side} {qty:.4f} {PRODUCT_ID} | Entry: {entry} | SL: {sl}"
     print(status_msg)
     send_telegram(status_msg)
     
@@ -60,20 +60,28 @@ def manage_trade(entry, tp1, tp2, sl, qty, side, entry_unix):
             # --- Trailing/Exit Logic ---
             if side == 'SELL':
                 if not tp1_hit:
-                    if price <= tp1: tp1_hit = True; send_telegram("💰 TP1 Hit! Risk removed.")
+                    if price <= tp1: 
+                        tp1_hit = True
+                        send_telegram("💰 TP1 Hit! Stop Loss moved to Breakeven.")
                     elif price >= sl: final_exit_price = sl; break
                 else:
-                    if price <= tp2: final_exit_price = (tp1 + tp2) / 2; break
-                    elif price >= entry: final_exit_price = (tp1 + entry) / 2; break
+                    if price <= tp2: final_exit_price = tp2; break
+                    elif price >= entry: final_exit_price = entry; break # Breakeven exit
+
             elif side == 'BUY':
                 if not tp1_hit:
-                    if price >= tp1: tp1_hit = True; send_telegram("💰 TP1 Hit! Risk removed.")
+                    if price >= tp1: 
+                        tp1_hit = True
+                        send_telegram("💰 TP1 Hit! Stop Loss moved to Breakeven.")
                     elif price <= sl: final_exit_price = sl; break
                 else:
-                    if price >= tp2: final_exit_price = (tp1 + tp2) / 2; break
-                    elif price <= entry: final_exit_price = (tp1 + entry) / 2; break
-            time.sleep(30)
-        except Exception: time.sleep(10); continue
+                    if price >= tp2: final_exit_price = tp2; break
+                    elif price <= entry: final_exit_price = entry; break # Breakeven exit
+            
+            time.sleep(20) # Check price every 20 seconds
+        except Exception as e:
+            print(f"⚠️ Monitor Error: {e}")
+            time.sleep(10); continue
 
     # Log to journal and RELEASE LOCK
     actual_pnl_usd = (abs(entry - final_exit_price) * qty) * (1 if (final_exit_price > entry and side == 'BUY') or (final_exit_price < entry and side == 'SELL') else -1)
@@ -84,49 +92,59 @@ def manage_trade(entry, tp1, tp2, sl, qty, side, entry_unix):
     })
     
     is_in_position = False # LOCK OFF
+    print(f"✅ Trade Closed at {final_exit_price}. PnL: ${actual_pnl_usd:.2f}")
     print("🔓 Bot is now free to look for new trades.")
 
 # --- 4. MAIN BOT LOOP ---
 def run_bot():
-    print(f"🚀 SMC Bot Initializing in {'VIRTUAL' if PAPER_MODE else 'REAL MONEY'} mode...")
+    print(f"🚀 SMC Bot Initializing with 4H Trend Filter...")
     print("-" * 30 + f"\n✅ Bot Online!\n💵 Balance: ${BALANCE:.2f}\n📍 Pair: {PRODUCT_ID}\n" + "-" * 30)
 
     while True:
         try:
-            # CHECK LOCK FIRST
+            # 1. CHECK LOCK
             if is_in_position:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] 💤 Trade in progress... skipping scan.")
                 time.sleep(60); continue
 
-            # Timing Sync
+            # 2. SYNC TO 5-MINUTE CANDLE
             seconds_into_candle = int(time.time()) % 300
-            if seconds_into_candle > 10:
-                wait_time = 300 - seconds_into_candle + 1
-                print(f"⏳ Waiting {wait_time}s for next candle close...")
+            if seconds_into_candle > 15:
+                wait_time = 300 - seconds_into_candle + 2
+                print(f"⏳ Syncing... Waiting {wait_time}s for next candle close.")
                 time.sleep(wait_time)
 
-            # Fetch Data
-            end_ts = int(time.time())
-            start_ts = end_ts - (300 * 110) # 10 extra candles for buffer
-            response = client.get_public_candles(product_id=PRODUCT_ID, granularity="FIVE_MINUTE", start=str(start_ts), end=str(end_ts))
-            candles = response['candles']
+            # 3. FETCH DATA (5M and 4H)
+            now = int(time.time())
+            
+            # 5-Minute Candles
+            resp_5m = client.get_public_candles(PRODUCT_ID, str(now - 300 * 110), str(now), "FIVE_MINUTE")
+            candles_5m = resp_5m['candles']
 
-            if not candles or len(candles) < LOOKBACK_WINDOW:
-                print("⚠️ Data Warning: Insufficient candles. Retrying..."); time.sleep(10); continue
+            # 4-Hour (SIX_HOUR in Coinbase API is the standard for 4H/6H HTF)
+            resp_htf = client.get_public_candles(PRODUCT_ID, str(now - 21600 * 50), str(now), "SIX_HOUR")
+            candles_htf = resp_htf['candles']
 
-            # Strategy Signal
-            signal, structural_p, counts = generate_trade_signal(candles, len(candles) - 1)
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛰️ HEARTBEAT | Trend: {counts['trend']} | Bullish: {counts['bull']}/3 | Bearish: {counts['bear']}/3")
+            if not candles_5m or not candles_htf:
+                print("⚠️ API returned empty data. Retrying..."); time.sleep(10); continue
 
+            # 4. RUN STRATEGY
+            signal, structural_p, counts = generate_trade_signal(candles_5m, candles_htf)
+            
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 🛰️ HEARTBEAT | Bias: {counts['bias']} | Bullish: {counts['bull']}/3 | Bearish: {counts['bear']}/3")
+
+            # 5. EXECUTION
             if signal in ['BUY', 'SELL'] and structural_p:
                 ticker = client.get_public_product(product_id=PRODUCT_ID)
                 entry_p = float(ticker['price'])
                 
-                # Risk Calc
+                # Position Sizing
                 pos_usd, sl_p = calculate_position_size(BALANCE, RISK_PCT, entry_p, float(structural_p), signal)
+                
                 if pos_usd > 0:
-                    tp1_p = calculate_take_profit(entry_p, sl_p, signal, 1.0)
-                    tp2_p = calculate_take_profit(entry_p, sl_p, signal, 2.0)
+                    tp1_p = calculate_take_profit(entry_p, sl_p, signal, 1.0) # 1:1 RR
+                    tp2_p = calculate_take_profit(entry_p, sl_p, signal, 2.0) # 1:2 RR
+                    
                     manage_trade(entry_p, tp1_p, tp2_p, sl_p, pos_usd/entry_p, signal, time.time())
 
             time.sleep(15)

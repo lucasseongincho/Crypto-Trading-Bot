@@ -16,7 +16,7 @@ def simulate_trade_outcome(signal, entry_price, sl, tp2, candles, start_index):
     current_sl = sl
     tp1_hit = False
     pnl_accumulated = 0
-    final_exit_price = entry_price # Default to entry
+    final_exit_price = entry_price 
 
     for j in range(start_index, len(candles)):
         low_p = float(candles[j]['low'])
@@ -32,21 +32,17 @@ def simulate_trade_outcome(signal, entry_price, sl, tp2, candles, start_index):
             # Check TP1 (Scale out 50%)
             if (signal == 'BUY' and high_p >= tp1) or (signal == 'SELL' and low_p <= tp1):
                 tp1_hit = True
-                # Profit from first 50%
                 pnl_accumulated += 0.5 * (tp1 - entry_price if signal == 'BUY' else entry_price - tp1)
                 current_sl = entry_price # Move remaining 50% to Breakeven
         else:
             # Check TP2 (Exit remaining 50%)
             if (signal == 'BUY' and high_p >= tp2) or (signal == 'SELL' and low_p <= tp2):
                 pnl_accumulated += 0.5 * (tp2 - entry_price if signal == 'BUY' else entry_price - tp2)
-                # Average Exit = (50% at TP1 + 50% at TP2)
                 avg_exit = (tp1 + tp2) / 2
                 return pnl_accumulated, bars_held, avg_exit
 
             # Check Breakeven Stop
             if (signal == 'BUY' and low_p <= current_sl) or (signal == 'SELL' and high_p >= current_sl):
-                # Remaining 50% closed at entry (0 profit)
-                # Average Exit = (50% at TP1 + 50% at Entry)
                 avg_exit = (tp1 + entry_price) / 2
                 return pnl_accumulated, bars_held, avg_exit
                 
@@ -60,9 +56,22 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
     timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M")
     report_filename = f"trade_journal_{asset_name}_{timestamp}.csv"
 
-    i = 50 
+    # We need at least 48 candles for a 4-hour trend check (48 * 5m = 4h)
+    # plus the 100-candle lookback for SMC logic.
+    i = 150 
+    
     while i < len(candles) - 1:
-        signal, structural_price, _ = generate_trade_signal(candles, i)
+        # --- FIX: Create Mock HTF Data from 5m Candles ---
+        # 5m window for entry logic
+        candles_5m = candles[i-100:i+1]
+        
+        # 4h window for trend bias (approx. last 48 candles)
+        # We take the current price and compare it to the price 48 bars ago
+        candles_htf = candles[i-48:i+1]
+        
+        # Call strategy with two arguments instead of (candles, i)
+        signal, structural_price, counts = generate_trade_signal(candles_5m, candles_htf)
+        
         entry_price = float(candles[i]['close'])
 
         if signal in ['BUY', 'SELL'] and structural_price:
@@ -70,8 +79,14 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
             pos_size, sl_price = calculate_position_size(
                 balance, risk_percent, entry_price, float(structural_price), signal
             )
+            
+            # Safety Check: If position size is 0 (failed min distance/logic), skip
+            if pos_size <= 0:
+                i += 1
+                continue
+
+            tp1_price = calculate_take_profit(entry_price, sl_price, signal, 1.0)
             tp2_price = calculate_take_profit(entry_price, sl_price, signal, 2.0)
-            tp1_price = calculate_take_profit(entry_price, sl_price, signal, 1.0) # For logging
 
             # 2. Simulate
             res_pnl_unit, duration, avg_exit = simulate_trade_outcome(
@@ -82,17 +97,17 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
             balance += actual_pnl
             exit_idx = min(i + max(1, duration), len(candles) - 1)
         
-            # 3. Log with NEW target columns
+            # 3. Log Trade
             log_trade({
                 'entry_unix': candles[i]['start'],
                 'exit_unix': candles[exit_idx]['start'],
                 'pair': product_id,
                 'side': signal,
                 'entry_price': entry_price,
-                'exit_price': avg_exit,      # Uses the calculated average
-                'tp1_price': tp1_price,      # New
-                'tp2_price': tp2_price,      # New
-                'sl_price': sl_price,        # New
+                'exit_price': avg_exit,
+                'tp1_price': tp1_price,
+                'tp2_price': tp2_price,
+                'sl_price': sl_price,
                 'pnl': round(actual_pnl, 2)
             }, filename=report_filename)
             
