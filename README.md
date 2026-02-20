@@ -55,11 +55,6 @@ Process the CSV through the simulation engine. This sorts data chronologically a
 ```bash
 python main.py --file BTC-USD_candles.csv
 ```
-### 3. Generate Performance Report of the lastest file
-Analyze the journal to see win rate, profit factor, and drawdowns.
-```bash
-python performance_summary.py --coin ETH
-```
 
 ## 📄 How to Run Paper testing
 Follow these steps to verify the strategy against live data using fake money.

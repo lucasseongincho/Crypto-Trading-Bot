@@ -1,56 +1,84 @@
-def detect_order_blocks(candles):
-    ob_list = []
-    # Loop to find initial OB patterns
-    for i in range(1, len(candles)):
-        prev = candles[i-1]
-        curr = candles[i]
-        
-        ob = None
-        # Bullish OB detection
-        if curr['close'] > curr['open'] and prev['close'] < prev['open'] and curr['close'] > prev['high']:
-            ob = {'type': 'bullish', 'low': prev['low'], 'high': prev['high'], 'index': i}
-        # Bearish OB detection
-        elif curr['close'] < curr['open'] and prev['close'] > prev['open'] and curr['close'] < prev['low']:
-            ob = {'type': 'bearish', 'low': prev['low'], 'high': prev['high'], 'index': i}
+﻿import pandas as pd
 
-        if ob:
-            # --- MITIGATION CHECK ---
-            # Check every candle from the OB creation until the latest candle
-            is_mitigated = False
-            for j in range(i + 1, len(candles)):
-                # If a future candle dips into a Bullish OB or rallies into a Bearish OB
-                if ob['type'] == 'bullish' and candles[j]['low'] <= ob['high']:
-                    is_mitigated = True
-                    break
-                elif ob['type'] == 'bearish' and candles[j]['high'] >= ob['low']:
-                    is_mitigated = True
-                    break
-            
-            if not is_mitigated:
-                ob_list.append(ob)
+def detect_order_blocks(candles):
+    """
+    Detects standard SMC Order Blocks.
+    Works with both Lists (Live) and DataFrames (Backtest).
+    """
+    # 🛡️ THE UNIVERSAL TRANSLATOR
+    df = pd.DataFrame(candles) if isinstance(candles, list) else candles
+    
+    # Ensure column names are lowercase so 'Close' or 'close' both work
+    df.columns = [x.lower() for x in df.columns]
+    
+    ob_list = []
+    
+    # Need at least 2 candles to compare
+    if len(df) < 2:
+        return ob_list
+
+    # Loop using .iloc for DataFrame safety
+    for i in range(1, len(df)):
+        prev = df.iloc[i-1]
+        curr = df.iloc[i]
+        
+        # Bullish OB: A down-close candle followed by a strong up-close candle
+        if float(prev['close']) < float(prev['open']) and float(curr['close']) > float(curr['open']):
+            if float(curr['close']) > float(prev['high']): # Engulfing / Strong push
+                ob_list.append({
+                    'type': 'bullish',
+                    'high': float(prev['high']),
+                    'low': float(prev['low']),
+                    'index': i
+                })
                 
+        # Bearish OB: An up-close candle followed by a strong down-close candle
+        elif float(prev['close']) > float(prev['open']) and float(curr['close']) < float(curr['open']):
+            if float(curr['close']) < float(prev['low']):
+                ob_list.append({
+                    'type': 'bearish',
+                    'high': float(prev['high']),
+                    'low': float(prev['low']),
+                    'index': i
+                })
+
     return ob_list
 
 def detect_fvg(candles):
+    """
+    Detects Fair Value Gaps (3-candle patterns).
+    """
+    # 🛡️ THE UNIVERSAL TRANSLATOR
+    df = pd.DataFrame(candles) if isinstance(candles, list) else candles
+    df.columns = [x.lower() for x in df.columns]
+    
     fvg_list = []
-    for i in range(2, len(candles)):
-        fvg = None
-        if candles[i]['low'] > candles[i-2]['high']:
-            fvg = {'type': 'bullish', 'low': candles[i-2]['high'], 'high': candles[i]['low'], 'index': i}
-        elif candles[i]['high'] < candles[i-2]['low']:
-            fvg = {'type': 'bearish', 'low': candles[i]['high'], 'high': candles[i-2]['low'], 'index': i}
+    
+    # Need at least 3 candles to find a gap
+    if len(df) < 3:
+        return fvg_list
 
-        if fvg:
-            # --- MITIGATION CHECK ---
-            is_mitigated = False
-            for j in range(i + 1, len(candles)):
-                if fvg['type'] == 'bullish' and candles[j]['low'] <= fvg['low']:
-                    is_mitigated = True
-                    break
-                elif fvg['type'] == 'bearish' and candles[j]['high'] >= fvg['high']:
-                    is_mitigated = True
-                    break
+    for i in range(2, len(df)):
+        candle_1 = df.iloc[i-2]
+        # candle_2 is the large impulse candle in the middle
+        candle_3 = df.iloc[i]
+        
+        # Bullish FVG: Gap between C1 High and C3 Low
+        if float(candle_3['low']) > float(candle_1['high']):
+            fvg_list.append({
+                'type': 'bullish',
+                'top': float(candle_3['low']),
+                'bottom': float(candle_1['high']),
+                'index': i
+            })
             
-            if not is_mitigated:
-                fvg_list.append(fvg)
+        # Bearish FVG: Gap between C1 Low and C3 High
+        elif float(candle_3['high']) < float(candle_1['low']):
+            fvg_list.append({
+                'type': 'bearish',
+                'top': float(candle_1['low']),
+                'bottom': float(candle_3['high']),
+                'index': i
+            })
+
     return fvg_list
