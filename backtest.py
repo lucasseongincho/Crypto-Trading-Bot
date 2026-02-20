@@ -7,16 +7,18 @@ from journal import log_trade
 
 def simulate_trade_outcome(signal, entry_price, sl, tp2, candles, start_index):
     """
-    Simulates a trade with a 50/50 scale-out at TP1 and a breakeven stop.
+    1:2 Hybrid Simulation:
+    - Moves SL to Breakeven at 1:1 (TP1)
+    - NO scale-out (keeps 100% position)
+    - Final exit at 1:2 (TP2) or SL/Breakeven.
     Returns: (total_pnl_units, bars_held, avg_exit_price)
     """
     risk_amount = abs(entry_price - sl)
-    # TP1 is a 1:1 Risk/Reward move
+    # TP1 is the 1:1 'Safety' trigger
     tp1 = entry_price + (risk_amount if signal == 'BUY' else -risk_amount)
     
     current_sl = sl
     tp1_hit = False
-    pnl_accumulated = 0
     final_exit_price = entry_price 
 
     for j in range(start_index, len(candles)):
@@ -25,39 +27,39 @@ def simulate_trade_outcome(signal, entry_price, sl, tp2, candles, start_index):
         bars_held = j - (start_index - 1)
 
         if not tp1_hit:
-            # 1. Check Stop Loss
+            # 1. Check Initial Stop Loss
             if (signal == 'BUY' and low_p <= current_sl) or (signal == 'SELL' and high_p >= current_sl):
                 final_exit_price = current_sl
+                # Full Loss (-1R)
                 return (current_sl - entry_price if signal == 'BUY' else entry_price - current_sl), bars_held, final_exit_price
 
-            # 2. Check TP1 (Scale out 50%)
+            # 2. Check 1:1 Safety Trigger (Move to Breakeven)
             if (signal == 'BUY' and high_p >= tp1) or (signal == 'SELL' and low_p <= tp1):
                 tp1_hit = True
-                pnl_accumulated += 0.5 * (tp1 - entry_price if signal == 'BUY' else entry_price - tp1)
-                current_sl = entry_price # Move remaining 50% to Breakeven
+                current_sl = entry_price # MOVE TO BREAKEVEN
         else:
-            # 3. Check TP2 (Exit remaining 50% at 1:3 RR)
+            # 3. Check Final TP2 (1:2 Reward)
             if (signal == 'BUY' and high_p >= tp2) or (signal == 'SELL' and low_p <= tp2):
-                pnl_accumulated += 0.5 * (tp2 - entry_price if signal == 'BUY' else entry_price - tp2)
-                avg_exit = (tp1 + tp2) / 2
-                return pnl_accumulated, bars_held, avg_exit
+                final_exit_price = tp2
+                # Full 1:2 Profit (+2R)
+                return (tp2 - entry_price if signal == 'BUY' else entry_price - tp2), bars_held, final_exit_price
 
             # 4. Check Breakeven Stop
             if (signal == 'BUY' and low_p <= current_sl) or (signal == 'SELL' and high_p >= current_sl):
-                avg_exit = (tp1 + entry_price) / 2
-                return pnl_accumulated, bars_held, avg_exit
+                final_exit_price = current_sl
+                # Breakeven Result (0 PnL)
+                return 0, bars_held, final_exit_price
                 
-    return pnl_accumulated, (len(candles) - start_index), entry_price
+    return 0, (len(candles) - start_index), entry_price
 
 def calculate_atr(candles, current_idx, period=14):
-    """Calculates the True Range average for the last 14 candles."""
+    """Calculates the True Range average for volatility-based buffering."""
     trs = []
-    # Start from 14 candles back up to the current one
     for j in range(current_idx - period, current_idx):
         if j <= 0: continue
         h = float(candles[j]['high'])
         l = float(candles[j]['low'])
-        pc = float(candles[j-1]['close']) # Previous close
+        pc = float(candles[j-1]['close'])
         tr = max(h - l, abs(h - pc), abs(l - pc))
         trs.append(tr)
     return sum(trs) / len(trs) if trs else 0
@@ -70,26 +72,20 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
     timestamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     report_filename = f"trade_journal_{asset_name}_{timestamp}.csv"
 
-    # Start index: needs 48 for HTF and 14 for ATR
+    # Start after trend/indicator lookback
     i = 150 
     
     while i < len(candles) - 1:
-        # 1. Prepare Data Windows
         candles_5m = candles[i-100:i+1]
         candles_htf = candles[i-48:i+1]
         
-        # 2. Get Strategy Signal
-        signal, structural_price, counts = generate_trade_signal(candles_5m, candles_htf)
+        signal, structural_price, _ = generate_trade_signal(candles_5m, candles_htf)
         
-        # 3. If a signal is found, calculate adaptive risk
         if signal in ['BUY', 'SELL'] and structural_price:
             entry_price = float(candles[i]['close'])
-            
-            # --- NEW: Calculate current market volatility (ATR) ---
             atr_now = calculate_atr(candles, i, period=14)
 
-            # 4. Calculate position with ATR-based buffer
-            # Note: Ensure your risk.py calculate_position_size accepts atr_value!
+            # --- Uses the 1.5x ATR buffer inside risk.py ---
             pos_size, sl_price = calculate_position_size(
                 balance, risk_percent, entry_price, float(structural_price), signal, atr_now
             )
@@ -98,11 +94,9 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
                 i += 1
                 continue
 
-            # 5. Set Targets (1:3 RR Sniper)
-            tp1_price = calculate_take_profit(entry_price, sl_price, signal, 1.0)
-            tp2_price = calculate_take_profit(entry_price, sl_price, signal, 3.0) 
+            # --- Target set to 1:2 RR ---
+            tp2_price = calculate_take_profit(entry_price, sl_price, signal, 1.5) 
 
-            # 6. Simulation
             res_pnl_unit, duration, avg_exit = simulate_trade_outcome(
                 signal, entry_price, sl_price, tp2_price, candles, i + 1
             )
@@ -111,7 +105,6 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
             balance += actual_pnl
             exit_idx = min(i + max(1, duration), len(candles) - 1)
         
-            # 7. Logging
             log_trade({
                 'entry_unix': candles[i]['start'],
                 'exit_unix': candles[exit_idx]['start'],
@@ -119,7 +112,7 @@ def run_backtest(candles, product_id, initial_balance=1000, risk_percent=1.0):
                 'side': signal,
                 'entry_price': entry_price,
                 'exit_price': avg_exit,
-                'tp1_price': tp1_price,
+                'tp1_price': entry_price + abs(entry_price - sl_price), # Visual 1:1 ref
                 'tp2_price': tp2_price,
                 'sl_price': sl_price,
                 'pnl': round(actual_pnl, 2)
