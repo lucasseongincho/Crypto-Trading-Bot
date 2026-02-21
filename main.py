@@ -9,8 +9,6 @@ def main():
     parser.add_argument('--file', type=str, required=True, help='Path to the historical CSV candle file')
     args = parser.parse_args()
 
-    IS_RESEARCH_MODE = True
-    
     print("="*50)
     print("🤖 SMC TRADING BOT: RESEARCH LAB MODE")
     print(f"📈 Testing Data: {args.file}")
@@ -22,31 +20,46 @@ def main():
         if df.empty:
             print("Error: The CSV file is empty.")
             return
-        # Ensure column headers are lowercase to prevent errors
+        
+        # Standardize columns to lowercase
         df.columns = [x.lower() for x in df.columns]
+        
+        # --- DATE LOGIC FOR 'START' (UNIX) OR 'DATE' COLUMNS ---
+        if 'start' in df.columns:
+            # Convert Unix timestamp (seconds) to a date object for the log
+            df['date_only'] = pd.to_datetime(df['start'], unit='s').dt.date
+            print("✅ Timestamps detected in 'start' column.")
+        elif 'date' in df.columns:
+            df['date_only'] = pd.to_datetime(df['date']).dt.date
+        elif 'time' in df.columns:
+            df['date_only'] = pd.to_datetime(df['time']).dt.date
+        else:
+            print("❌ ERROR: No 'start', 'date', or 'time' column found.")
+            return
+
     except FileNotFoundError:
         print(f"Error: Could not find file '{args.file}'")
         return
 
     # --- 3. INITIALIZE COMPONENTS ---
     strategy = SMCStrategy()
+    # We keep RiskManager for the balance tracking and CSV exporting
     risk = RiskManager(initial_balance=1000.0)
 
-    # --- 4. THE RESEARCH LOOP (Realistic Forward-Walking) ---
+    # --- 4. THE RESEARCH LOOP ---
     total_candles = len(df)
-    print("\n🚀 Starting Simulation (Realistic Forward-Walking)...")
-    print("🔇 Trade prints are muted. Waiting for final results...\n")
+    print("\n🚀 Starting Simulation (No Circuit Breaker)...")
     
     cooldown_timer = 0  
-    active_trade = None  # Tracks our open position in time
+    active_trade = None  
     
     for i in range(100, total_candles):
         
-        # ⏱️ PROGRESS TRACKER
         if i % 10000 == 0:
             print(f"⏳ Scanned {i} of {total_candles} candles...")
 
         current_candle = df.iloc[i]
+        sim_date = current_candle['date_only']
 
         # ==========================================
         # 🛑 STATE 1: MANAGE OPEN TRADE
@@ -54,9 +67,7 @@ def main():
         if active_trade is not None:
             trade_result = None
             
-            # Did the market hit our Stop Loss or Take Profit this candle?
             if active_trade['type'] == 'BUY':
-                # Check Stop Loss first (conservative backtesting)
                 if current_candle['low'] <= active_trade['stop_loss']:
                     trade_result = "LOSS"
                 elif current_candle['high'] >= active_trade['take_profit']:
@@ -68,13 +79,16 @@ def main():
                 elif current_candle['low'] <= active_trade['take_profit']:
                     trade_result = "WIN"
 
-            # If a target was hit, close the trade and log it!
             if trade_result:
-                risk.log_virtual_trade(active_trade['signal_data'], result=trade_result)
-                active_trade = None  # Clear the position
-                cooldown_timer = 12  # Wait 1 hour before looking for next setup
-                
-            continue # Skip looking for new setups while we are busy managing this trade
+                risk.log_virtual_trade(
+                    trade_date=sim_date,
+                    signal_type=active_trade['type'],
+                    entry_price=active_trade['entry_price'],
+                    result=trade_result
+                )
+                active_trade = None  
+                cooldown_timer = 12  # 1 hour cooldown
+            continue 
 
         # ==========================================
         # 🎯 STATE 2: LOOK FOR NEW SETUP
@@ -91,31 +105,26 @@ def main():
             sl = signal['stop_loss']
             risk_dist = abs(entry - sl)
             
-            # Safety check: if Entry and SL are the exact same, skip it
             if risk_dist == 0:
                 continue
                 
-            # Calculate exact Take Profit based on the 1.5 Risk/Reward ratio
             if signal['type'] == 'BUY':
                 tp = entry + (risk_dist * risk.rr_ratio)
             else:
                 tp = entry - (risk_dist * risk.rr_ratio)
 
-            # Lock the engine into this trade!
             active_trade = {
                 'type': signal['type'],
                 'entry_price': entry,
                 'stop_loss': sl,
-                'take_profit': round(tp, 2),
-                'signal_data': signal # Store original signal to pass to the logger later
+                'take_profit': round(tp, 2)
             }
 
     print("\n" + "="*50)
     print("📊 SIMULATION COMPLETE")
     print(f"Final Virtual Equity: ${risk.current_balance:.2f}")
     
-    # 📁 EXPORT THE CSV
-    risk.export_csv()
+    risk.export_csv("trade_log.csv")
     print("="*50)
 
 if __name__ == "__main__":

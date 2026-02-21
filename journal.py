@@ -5,7 +5,7 @@ from datetime import datetime
 def log_trade(trade_data, filename="trade_journal.csv"):
     """
     Appends a new trade record to the CSV journal. 
-    Includes TP1, TP2, and SL prices for better debugging.
+    Includes TP1, TP2, SL prices, and the running Balance.
     """
     
     # 1. Format the Date and Time from Unix timestamps
@@ -32,7 +32,8 @@ def log_trade(trade_data, filename="trade_journal.csv"):
         round(trade_data['tp1_price'], 2),      # Column 8: TP1 Target
         round(trade_data['tp2_price'], 2),      # Column 9: TP2 Target
         round(trade_data['sl_price'], 2),       # Column 10: Initial Stop Loss
-        round(trade_data['pnl'], 2)             # Column 11: Total P/L USD
+        round(trade_data['pnl'], 2),            # Column 11: Total P/L USD
+        round(trade_data.get('balance', 0), 2)  # Column 12: Account Balance
     ]
 
     # 3. Check if file exists to determine if we need a header
@@ -46,7 +47,7 @@ def log_trade(trade_data, filename="trade_journal.csv"):
         if not file_exists:
             writer.writerow([
                 'Entry_Date', 'Exit_Date', 'Holding_M', 'Pair', 'Side', 
-                'Entry_Price', 'Exit_Price', 'TP1_Price', 'TP2_Price', 'SL_Price', 'P/L_USD'
+                'Entry_Price', 'Exit_Price', 'TP1_Price', 'TP2_Price', 'SL_Price', 'P/L_USD', 'Balance'
             ])
             
         writer.writerow(row)

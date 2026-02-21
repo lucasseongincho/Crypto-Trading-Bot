@@ -1,4 +1,5 @@
 ﻿import os
+import sys
 import time
 import requests
 import pandas as pd
@@ -26,6 +27,10 @@ BALANCE = 1000.0   # Default starting balance for Paper Mode
 TOTAL_TRADES = 0   
 IS_IN_POSITION = False 
 
+# 📈 DYNAMIC KILL SWITCH VARIABLES
+HIGH_WATER_MARK = BALANCE
+MAX_DRAWDOWN_PERCENT = 0.30  # 30% acceptable drop from the peak
+
 HEARTBEAT_INTERVAL = 3600  
 last_heartbeat_time = 0
 
@@ -44,13 +49,12 @@ def send_telegram(message):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-# 🛡️ THE FIX: Safely parse the Coinbase SDK response
+# 🛡️ Safely parse the Coinbase SDK response
 def parse_candles(response):
     """
     Converts Coinbase objects/dicts into a clean Pandas DataFrame.
     Prevents the 'int object' error and ensures chronological order.
     """
-    # Extract the actual list of candles safely
     raw_list = response['candles'] if isinstance(response, dict) else (response.candles if hasattr(response, 'candles') else response)
     
     clean_data = []
@@ -65,11 +69,8 @@ def parse_candles(response):
     df = pd.DataFrame(clean_data)
     
     if not df.empty:
-        # Force column names to strings to prevent the 'int' crash
         df.columns = [str(x).lower() for x in df.columns]
-        
-        # ⚠️ CRITICAL FIX: Coinbase returns newest candles first. 
-        # We MUST sort oldest to newest for SMC to read left-to-right!
+        # ⚠️ CRITICAL FIX: Sort oldest to newest for SMC to read left-to-right!
         if 'start' in df.columns:
             df['start'] = df['start'].astype(int)
             df = df.sort_values('start', ascending=True).reset_index(drop=True)
@@ -95,14 +96,17 @@ def manage_trade(entry, sl, tp_final, qty, side, entry_unix):
             ticker = client.get_public_product(product_id=PRODUCT_ID)
             price = float(ticker['price'])
 
+            # 1. Check Stop Loss
             if (side == 'BUY' and price <= sl) or (side == 'SELL' and price >= sl):
                 final_exit_price = sl
                 break
             
+            # 2. Check Take Profit
             if (side == 'BUY' and price >= tp_final) or (side == 'SELL' and price <= tp_final):
                 final_exit_price = tp_final
                 break
 
+            # 3. Check Safety Target (Move to Breakeven)
             if not is_breakeven:
                 if (side == 'BUY' and price >= tp_safety) or (side == 'SELL' and price <= tp_safety):
                     sl = entry 
@@ -115,6 +119,7 @@ def manage_trade(entry, sl, tp_final, qty, side, entry_unix):
         except Exception as e:
             print(f"Monitor Error: {e}"); time.sleep(5)
 
+    # Calculate PnL and Update Balance
     direction_mult = 1 if side == 'BUY' else -1
     pnl = (final_exit_price - entry) * qty * direction_mult
     
@@ -122,11 +127,13 @@ def manage_trade(entry, sl, tp_final, qty, side, entry_unix):
     risk.current_balance = BALANCE # Keep Risk Manager in sync
     TOTAL_TRADES += 1
     
+    # Log to CSV Journal
     try:
         journal.log_trade({
             'entry_unix': entry_unix, 'exit_unix': time.time(), 'pair': PRODUCT_ID, 'side': side,
             'entry_price': entry, 'exit_price': final_exit_price, 'tp1_price': tp_safety, 'tp2_price': tp_final,
-            'sl_price': sl, 'pnl': round(pnl, 2)
+            'sl_price': sl, 'pnl': round(pnl, 2),
+            'balance': round(BALANCE, 2) 
         })
     except Exception as e:
         print(f"Journal Error: {e}")
@@ -139,18 +146,42 @@ def manage_trade(entry, sl, tp_final, qty, side, entry_unix):
 # --- 4. MAIN EXECUTION LOOP ---
 
 def run_bot():
-    global last_heartbeat_time
+    global last_heartbeat_time, HIGH_WATER_MARK
     print(f"--- SNIPER BOT LIVE (1.11 PF LOGIC) ---")
     
     send_telegram(f"🚀 Sniper Bot is ONLINE.\nMode: {'PAPER' if PAPER_MODE else 'LIVE'}\nStarting Balance: ${BALANCE}")
     
     while True:
         try:
+            # ==========================================
+            # 📈 UPDATE HIGH WATER MARK
+            # ==========================================
+            if BALANCE > HIGH_WATER_MARK:
+                HIGH_WATER_MARK = BALANCE
+                
+            dynamic_kill_limit = HIGH_WATER_MARK * (1.0 - MAX_DRAWDOWN_PERCENT)
+
+            # ==========================================
+            # 🛑 THE DYNAMIC KILL SWITCH
+            # ==========================================
+            if BALANCE <= dynamic_kill_limit:
+                msg = (f"🚨 FATAL: Balance dropped to ${round(BALANCE, 2)}.\n"
+                       f"📉 This is a 30% drop from peak (${round(HIGH_WATER_MARK, 2)}).\n"
+                       f"🛑 Kill Switch Activated. Bot shutting down forever.")
+                print("\n" + msg)
+                send_telegram(msg)
+                sys.exit() 
+
+            # ==========================================
+            # 💓 HEARTBEAT & STATUS ALERTS
+            # ==========================================
             current_time = time.time()
             if current_time - last_heartbeat_time >= HEARTBEAT_INTERVAL:
                 status_msg = (
                     f"💓 Heartbeat Status\n"
                     f"💰 Balance: ${round(BALANCE, 2)}\n"
+                    f"🏔️ Peak Balance: ${round(HIGH_WATER_MARK, 2)}\n"
+                    f"🛑 Kill Limit: ${round(dynamic_kill_limit, 2)}\n"
                     f"📊 Total Trades: {TOTAL_TRADES}\n"
                     f"🔎 Scanning: {PRODUCT_ID}"
                 )
@@ -170,7 +201,7 @@ def run_bot():
             resp_5m = client.get_public_candles(PRODUCT_ID, str(now - 300*150), str(now), "FIVE_MINUTE")
             resp_htf = client.get_public_candles(PRODUCT_ID, str(now - 21600*50), str(now), "SIX_HOUR")
             
-            # 🛡️ Parse & Sort Data Chronologically
+            # 🛡️ Parse & Sort Data
             df_5m = parse_candles(resp_5m)
             df_htf = parse_candles(resp_htf)
 
