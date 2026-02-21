@@ -1,14 +1,15 @@
 ﻿import os
 import time
 import requests
+import pandas as pd
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 
 # DIRECT IMPORTS FROM YOUR FILES
 from auth import client # Uses your cdp_api_key.json hub
-from strategy import generate_trade_signal
-from risk import calculate_position_size, calculate_take_profit
+from strategy import SMCStrategy
+from risk import RiskManager
 import journal 
 
 # --- 1. SETUP & ENV ---
@@ -19,20 +20,22 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 
 # --- 2. CONFIGURATION ---
-PAPER_MODE = True  # Set to False to execute real trades on Coinbase
+PAPER_MODE = True  # Set to False to execute real trades
 PRODUCT_ID = "BTC-USD"
 BALANCE = 1000.0   # Default starting balance for Paper Mode
-TOTAL_TRADES = 0   # Counter for Heartbeat
+TOTAL_TRADES = 0   
 IS_IN_POSITION = False 
 
-# Heartbeat Settings
-HEARTBEAT_INTERVAL = 3600  # 1hour (3600 sec)
+HEARTBEAT_INTERVAL = 3600  
 last_heartbeat_time = 0
+
+# 🧠 INITIALIZE THE CLASSES
+strategy = SMCStrategy()
+risk = RiskManager(initial_balance=BALANCE)
 
 # --- 3. HELPER FUNCTIONS ---
 
 def send_telegram(message):
-    """Uses your .env keys to send real-time alerts."""
     prefix = "🚨 [LIVE SNIPER] " if not PAPER_MODE else "📝 [PAPER SNIPER] "
     if not TELEGRAM_TOKEN or not CHAT_ID: return
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
@@ -41,24 +44,39 @@ def send_telegram(message):
     except Exception as e:
         print(f"Telegram Error: {e}")
 
-def get_atr(candles, period=14):
-    """Calculates ATR to satisfy the requirement in your risk.py."""
-    if len(candles) < period + 1: return 0
-    trs = []
-    for i in range(1, period + 1):
-        h = float(candles[-i]['high'])
-        l = float(candles[-i]['low'])
-        pc = float(candles[-i-1]['close'])
-        tr = max(h - l, abs(h - pc), abs(l - pc))
-        trs.append(tr)
-    return sum(trs) / len(trs)
+# 🛡️ THE FIX: Safely parse the Coinbase SDK response
+def parse_candles(response):
+    """
+    Converts Coinbase objects/dicts into a clean Pandas DataFrame.
+    Prevents the 'int object' error and ensures chronological order.
+    """
+    # Extract the actual list of candles safely
+    raw_list = response['candles'] if isinstance(response, dict) else (response.candles if hasattr(response, 'candles') else response)
+    
+    clean_data = []
+    for c in raw_list:
+        if isinstance(c, dict):
+            clean_data.append(c)
+        elif hasattr(c, 'to_dict'):
+            clean_data.append(c.to_dict())
+        elif hasattr(c, '__dict__'):
+            clean_data.append(vars(c))
+            
+    df = pd.DataFrame(clean_data)
+    
+    if not df.empty:
+        # Force column names to strings to prevent the 'int' crash
+        df.columns = [str(x).lower() for x in df.columns]
+        
+        # ⚠️ CRITICAL FIX: Coinbase returns newest candles first. 
+        # We MUST sort oldest to newest for SMC to read left-to-right!
+        if 'start' in df.columns:
+            df['start'] = df['start'].astype(int)
+            df = df.sort_values('start', ascending=True).reset_index(drop=True)
+            
+    return df
 
 def manage_trade(entry, sl, tp_final, qty, side, entry_unix):
-    """
-    Hybrid Management:
-    1. Monitors for 1:1 RR to move SL to Breakeven.
-    2. Closes at 1.5R.
-    """
     global IS_IN_POSITION, BALANCE, TOTAL_TRADES
     IS_IN_POSITION = True
     
@@ -70,46 +88,52 @@ def manage_trade(entry, sl, tp_final, qty, side, entry_unix):
     
     msg = f"🟢 Trade Opened: {side} {qty:.5f}\nEntry: {entry}\nSL: {sl}\nTarget (1.5R): {tp_final}"
     send_telegram(msg)
+    print("\n" + msg)
 
     while True:
         try:
             ticker = client.get_public_product(product_id=PRODUCT_ID)
             price = float(ticker['price'])
 
-            # 1. CHECK STOP LOSS
             if (side == 'BUY' and price <= sl) or (side == 'SELL' and price >= sl):
                 final_exit_price = sl
                 break
             
-            # 2. CHECK TAKE PROFIT (1.5R)
             if (side == 'BUY' and price >= tp_final) or (side == 'SELL' and price <= tp_final):
                 final_exit_price = tp_final
                 break
 
-            # 3. CHECK BREAKEVEN TRIGGER (1:1R)
             if not is_breakeven:
                 if (side == 'BUY' and price >= tp_safety) or (side == 'SELL' and price <= tp_safety):
                     sl = entry 
                     is_breakeven = True
-                    send_telegram(f"🛡️ Safety reached! Stop Loss moved to Breakeven ({entry})")
+                    alert = f"🛡️ Safety reached! Stop Loss moved to Breakeven ({entry})"
+                    send_telegram(alert)
+                    print(alert)
 
             time.sleep(5) 
         except Exception as e:
             print(f"Monitor Error: {e}"); time.sleep(5)
 
-    # EXIT LOGIC & STATS UPDATE
-    pnl = (abs(entry - final_exit_price) * qty) * (1 if (final_exit_price > entry and side == 'BUY') or (final_exit_price < entry and side == 'SELL') else -1)
+    direction_mult = 1 if side == 'BUY' else -1
+    pnl = (final_exit_price - entry) * qty * direction_mult
     
     BALANCE += pnl
+    risk.current_balance = BALANCE # Keep Risk Manager in sync
     TOTAL_TRADES += 1
     
-    journal.log_trade({
-        'entry_unix': entry_unix, 'exit_unix': time.time(), 'pair': PRODUCT_ID, 'side': side,
-        'entry_price': entry, 'exit_price': final_exit_price, 'tp1_price': tp_safety, 'tp2_price': tp_final,
-        'sl_price': sl, 'pnl': round(pnl, 2)
-    })
+    try:
+        journal.log_trade({
+            'entry_unix': entry_unix, 'exit_unix': time.time(), 'pair': PRODUCT_ID, 'side': side,
+            'entry_price': entry, 'exit_price': final_exit_price, 'tp1_price': tp_safety, 'tp2_price': tp_final,
+            'sl_price': sl, 'pnl': round(pnl, 2)
+        })
+    except Exception as e:
+        print(f"Journal Error: {e}")
     
-    send_telegram(f"🏁 Trade Closed at {final_exit_price}\nPnL: ${round(pnl, 2)}\nNew Balance: ${round(BALANCE, 2)}")
+    close_msg = f"🏁 Trade Closed at {final_exit_price}\nPnL: ${round(pnl, 2)}\nNew Balance: ${round(BALANCE, 2)}"
+    send_telegram(close_msg)
+    print("\n" + close_msg)
     IS_IN_POSITION = False
 
 # --- 4. MAIN EXECUTION LOOP ---
@@ -118,12 +142,10 @@ def run_bot():
     global last_heartbeat_time
     print(f"--- SNIPER BOT LIVE (1.11 PF LOGIC) ---")
     
-    # POWER ON NOTIFICATION
     send_telegram(f"🚀 Sniper Bot is ONLINE.\nMode: {'PAPER' if PAPER_MODE else 'LIVE'}\nStarting Balance: ${BALANCE}")
     
     while True:
         try:
-            # HEARTBEAT LOGIC
             current_time = time.time()
             if current_time - last_heartbeat_time >= HEARTBEAT_INTERVAL:
                 status_msg = (
@@ -138,29 +160,40 @@ def run_bot():
             if IS_IN_POSITION:
                 time.sleep(60); continue
 
-            # Sync to the 5m candle close
             wait = 300 - (int(time.time()) % 300) + 2
             print(f"⌛ Syncing... scanning in {wait}s")
             time.sleep(wait)
 
-            # Fetch Data
             now = int(time.time())
-            c_5m = client.get_public_candles(PRODUCT_ID, str(now - 300*150), str(now), "FIVE_MINUTE")['candles']
-            c_htf = client.get_public_candles(PRODUCT_ID, str(now - 21600*50), str(now), "SIX_HOUR")['candles']
-
-            # Run strategy logic
-            signal, structural_p, counts = generate_trade_signal(c_5m, c_htf)
             
-            if signal in ['BUY', 'SELL'] and structural_p:
-                ticker = client.get_public_product(product_id=PRODUCT_ID)
-                price = float(ticker['price'])
-                atr = get_atr(c_5m)
+            # 📡 Fetch Data
+            resp_5m = client.get_public_candles(PRODUCT_ID, str(now - 300*150), str(now), "FIVE_MINUTE")
+            resp_htf = client.get_public_candles(PRODUCT_ID, str(now - 21600*50), str(now), "SIX_HOUR")
+            
+            # 🛡️ Parse & Sort Data Chronologically
+            df_5m = parse_candles(resp_5m)
+            df_htf = parse_candles(resp_htf)
+
+            if df_5m.empty:
+                print("⚠️ Received empty data from Coinbase. Retrying...")
+                continue
+
+            # 🧠 Run strategy logic
+            signal_data = strategy.check_setup(df_5m, df_htf)
+            
+            if signal_data:
+                side = signal_data['type']
+                entry = signal_data['entry_price']
+                sl = signal_data['stop_loss']
                 
-                pos_usd, sl_price = calculate_position_size(BALANCE, 1.0, price, float(structural_p), signal, atr)
+                # 🧮 Dynamic Risk Sizing
+                qty = risk.calculate_size(entry, sl)
                 
-                if pos_usd > 0:
-                    tp_price = calculate_take_profit(price, sl_price, signal, 1.5)
-                    manage_trade(price, sl_price, tp_price, pos_usd/price, signal, time.time())
+                if qty > 0:
+                    risk_dist = abs(entry - sl)
+                    tp_final = entry + (risk_dist * risk.rr_ratio) if side == 'BUY' else entry - (risk_dist * risk.rr_ratio)
+                    
+                    manage_trade(entry, sl, round(tp_final, 2), qty, side, time.time())
 
         except Exception as e:
             print(f"Main Loop Error: {e}"); time.sleep(30)
