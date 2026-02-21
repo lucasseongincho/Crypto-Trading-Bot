@@ -6,11 +6,22 @@ class RiskManager:
         self.trade_history = []
         self.rr_ratio = 1.5  # Risk-to-Reward Ratio
 
+    def calculate_size(self, entry_price, stop_loss):
+        """
+        Calculates position size based on risking 1% of the current balance.
+        """
+        risk_amount = self.current_balance * 0.01
+        risk_per_coin = abs(entry_price - stop_loss)
+        
+        if risk_per_coin == 0:
+            return 0
+            
+        # Return quantity of coin to buy/sell
+        qty = risk_amount / risk_per_coin
+        return qty
+
     def log_virtual_trade(self, trade_date, signal_type, entry_price, result):
-        """
-        Calculates PnL and updates history using the Live-compatible format.
-        """
-        # Risk 1% of current balance per trade
+        # ... (keep your existing log_virtual_trade code here)
         risk_amount = self.current_balance * 0.01
         
         if result == "WIN":
@@ -20,7 +31,6 @@ class RiskManager:
         
         self.current_balance += pnl
         
-        # Standardized keys: date, type, entry, result, pnl, balance
         self.trade_history.append({
             'date': trade_date,
             'type': signal_type,
@@ -31,7 +41,7 @@ class RiskManager:
         })
 
     def export_csv(self, filename="trade_log.csv"):
-        """Exports the full history to a CSV file."""
+        # ... (keep your existing export_csv code here)
         if not self.trade_history:
             print("⚠️ No trades to export.")
             return

@@ -1,52 +1,29 @@
-﻿from risk import calculate_position_size, calculate_take_profit
+﻿import unittest
+from risk import RiskManager
 
-def run_unit_test():
-    # --- TEST DATA ---
-    balance = 1000.0
-    risk_pct = 1.0
-    entry_price = 3000.0
-    
-    print("🧪 STARTING RISK LOGIC UNIT TEST\n" + "="*40)
+class TestRiskManager(unittest.TestCase):
+    def setUp(self):
+        # Initialize a fresh RiskManager before each test
+        self.risk = RiskManager(initial_balance=1000.0)
 
-    # --- TEST 1: BUY (LONG) ---
-    # In a BUY, SL must be BELOW entry
-    bullish_sl_target = 2950.0 
-    
-    pos_size_buy, sl_buy = calculate_position_size(balance, risk_pct, entry_price, bullish_sl_target, 'BUY')
-    tp2_buy = calculate_take_profit(entry_price, sl_buy, 'BUY', 2.0)
+    def test_calculate_size(self):
+        # 1% of 1000 = $10 risk. 
+        # Entry 50000, SL 49000 -> $1000 risk per coin.
+        # Size should be 10 / 1000 = 0.01
+        size = self.risk.calculate_size(entry_price=50000, stop_loss=49000)
+        self.assertEqual(size, 0.01)
 
-    print(f"🔹 [BUY TEST]")
-    print(f"   Entry: {entry_price}")
-    print(f"   Final SL: {sl_buy:.2f} (Should be < {entry_price})")
-    print(f"   Final TP2: {tp2_buy:.2f} (Should be > {entry_price})")
-    
-    # Validation Logic
-    if sl_buy < entry_price and tp2_buy > entry_price:
-        print("   ✅ BUY MATH PASSED")
-    else:
-        print("   ❌ BUY MATH FAILED")
+    def test_log_virtual_trade_win(self):
+        # Win should add 1.5% ($15) to balance
+        self.risk.log_virtual_trade("2026-02-01", "BUY", 50000, "WIN")
+        self.assertEqual(self.risk.current_balance, 1015.0)
+        self.assertEqual(self.risk.trade_history[0]['pnl'], 15.0)
 
-    print("-" * 40)
+    def test_log_virtual_trade_loss(self):
+        # Loss should deduct 1% ($10) from balance
+        self.risk.log_virtual_trade("2026-02-01", "SELL", 50000, "LOSS")
+        self.assertEqual(self.risk.current_balance, 990.0)
+        self.assertEqual(self.risk.trade_history[0]['pnl'], -10.0)
 
-    # --- TEST 2: SELL (SHORT) ---
-    # In a SELL, SL must be ABOVE entry
-    bearish_sl_target = 3050.0 
-    
-    pos_size_sell, sl_sell = calculate_position_size(balance, risk_pct, entry_price, bearish_sl_target, 'SELL')
-    tp2_sell = calculate_take_profit(entry_price, sl_sell, 'SELL', 2.0)
-
-    print(f"🔸 [SELL TEST]")
-    print(f"   Entry: {entry_price}")
-    print(f"   Final SL: {sl_sell:.2f} (Should be > {entry_price})")
-    print(f"   Final TP2: {tp2_sell:.2f} (Should be < {entry_price})")
-    
-    # Validation Logic
-    if sl_sell > entry_price and tp2_sell < entry_price:
-        print("   ✅ SELL MATH PASSED")
-    else:
-        print("   ❌ SELL MATH FAILED")
-
-    print("="*40)
-
-if __name__ == "__main__":
-    run_unit_test()
+if __name__ == '__main__':
+    unittest.main()

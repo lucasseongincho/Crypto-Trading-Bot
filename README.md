@@ -1,93 +1,127 @@
-# 🤖 Crypto-Trading-Bot (SMC Edition)
+🎯 SMC Sniper Bot
+=================
 
-This project is a crypto trading bot designed for Coinbase Advanced Trade, utilizing **Smart Money Concepts (SMC)** to identify high-probability institutional footprints in the market.
+A Python-based algorithmic trading bot that executes a **Smart Money Concepts (SMC)** strategy on cryptocurrency markets (BTC-USD). The bot features a robust Object-Oriented architecture, a fully offline backtesting engine, and a live paper-trading module integrated with the Coinbase API and Telegram.
 
----
+✨ Key Features
+--------------
 
-## 🗺️ Contributor Roadmap
-Before we start coding, please follow this path to understand how the bot "thinks" and how the project is structured.
+-   **SMC Strategy Logic:** Automatically scans 5-minute and 6-hour candles for liquidity sweeps and Fair Value Gaps (FVG).
 
-### 1. The "Big Picture" (Trading Concepts)
-Our bot doesn't just look at price; it looks for **Institutional Intent**. To understand our entry logic, please research these three terms:
+-   **Dynamic Risk Management:** Automatically sizes positions to risk exactly 1% of the current account balance per trade, targeting a 1:1.5 Risk/Reward ratio.
 
-* **Liquidity Sweeps:** How "Smart Money" triggers retail Stop Losses to gather buy/sell orders before a major move.
-* **Market Structure Shift (MSS):** How we identify the exact moment a trend reverses on a lower time frame.
-* **Fair Value Gaps (FVG) & Order Blocks:** The specific "inefficiencies" and "footprints" left behind by large orders where we look to enter.
+-   **Trailing Kill Switch:** A dynamic, account-level safety net that locks in profits. If the account drops 30% from its all-time high, the bot immediately shuts down to protect capital.
 
-### 2. The Code Hierarchy (Reading Order)
-Read the files in this order to understand the logic flow:
+-   **Paper Trading Mode:** Pulls live market data from Coinbase but simulates order execution to safely forward-test strategies.
 
-1. **`live_main.py` (The Production Engine):** **Run this for actual trading.** It connects to live data, manages 24/7 execution, and sends Telegram updates.
-2. **`main.py` (The Research Lab):** **Now for Backtesting ONLY.** It is hard-locked to prevent accidental live trades. Use this to test new ideas on historical data.
-3. **`strategy.py` (The Brain):** Shared logic used by both the live engine and the research lab to find signals.
-4. **`risk.py` (The Accountant):** Shared risk module that calculates position sizes, 1.5R Take Profits, and Breakeven stops.
-5. **`journal.py`:** Automatically logs every completed trade for performance analysis.
+-   **Telegram Integration:** Sends real-time trade alerts (Open, Close, Stop-Loss moves) and hourly heartbeat status updates directly to your phone.
 
-### 3. Environment Setup
-To run the bot locally, you will need:
-* **Python 3.10+**
-* **Virtual Environment:** `python -m venv venv` then `venv\Scripts\activate`
-* **API Credentials:**
-    * `cdp_api_key.json`: Your Coinbase CDP keys - You can download it from Coinbase when you make an account.
-    * `.env`: Your `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`.
+-   **Standardized Logging:** Records all trades, durations, and targets into a clean `trade_journal.csv` for easy analysis.
 
----
+* * * * *
 
-## 📡 Live Monitoring & Telegram
-The bot is designed for "set it and forget it" operation with real-time feedback via Telegram.
+📂 Project Architecture
+-----------------------
 
-* **Heartbeat Messages:** Every candle scan, the bot sends a status update to confirm it is still online, showing current balance and total trades.
-* **Trade Alerts:** Instant notifications for **Trade Entry**, **Safety Reached (Move to Breakeven)**, and **Final Exit**.
-* **Power Alerts:** Notifies you immediately if the bot script starts or restarts.
+The bot has been strictly refactored into 6 core modules:
 
----
+1.  **`live_main.py`** - The Live/Paper Execution Engine. Connects to Coinbase, manages the trading loop, and handles live position monitoring.
 
-## 🧪 How to Run Research (Backtesting)
-Follow these steps to verify the strategy against historical data.
+2.  **`main.py`** - The Backtest Research Lab. Reads historical CSV data to rapidly test the strategy without network delays.
 
-### 1. Download Historical Data
-Fetch 5-minute candles directly from Coinbase.
-```bash
-python download_data.py --pair BTC-USD --start 2025-01-02 --end 2025-12-31
+3.  **`strategy.py`** - *The Brain.* Contains the `SMCStrategy` class which analyzes price action and generates Buy/Sell signals.
+
+4.  **`risk.py`** - *The Accountant.* Contains the `RiskManager` class which handles position sizing, virtual balance tracking, and PnL math.
+
+5.  **`journal.py`** - *The Logger.* Formats and writes detailed trade data to `trade_journal.csv`.
+
+6.  **`test_risk.py`** - Unit tests to ensure the RiskManager math is executing flawlessly.
+
+* * * * *
+
+⚙️ Setup & Installation
+-----------------------
+
+### 1\. Prerequisites
+
+-   Python 3.10+
+
+-   Pandas, Requests, Python-dotenv
+
+-   Coinbase SDK (for API connection)
+
+### 2\. Virtual Environment Setup
+
+To keep your dependencies clean, it is highly recommended to run the bot inside a virtual environment:
+
+
 ```
-### 2. Run the Backtest Simulation
-Process the CSV through the simulation engine. This sorts data chronologically and generates **`trade_journal.csv`**.
-```bash
+python -m venv venv
+venv\Scripts\activate
+
+```
+
+*(Note: If you are on Mac/Linux, use `source venv/bin/activate` instead).*
+
+### 3\. Environment Setup & API Credentials
+
+To run the bot locally, you will need to set up your keys:
+
+-   **`cdp_api_key.json`**: Your Coinbase CDP keys. You can download this file directly from Coinbase when you create an API account. Place it in your project's root folder.
+
+-   **`.env`**: Create this file in the root directory and add your Telegram credentials:
+
+
+```
+TELEGRAM_BOT_TOKEN=your_bot_token_here
+TELEGRAM_CHAT_ID=your_chat_id_here
+
+```
+
+* * * * *
+
+🚀 Usage
+--------
+
+### 1\. Download Historical Data
+
+Fetch 5-minute candles directly from Coinbase to use for your offline backtests.
+
+```
+python download_data.py --pair BTC-USD --start 2026-02-01 --end 2026-02-21
+
+```
+
+### 2\. Running a Backtest
+
+To test the strategy against the historical data you just downloaded, use `main.py`:
+
+```
 python main.py --file BTC-USD_candles.csv
+
 ```
 
-## 📄 How to Run Paper testing
-Follow these steps to verify the strategy against live data using fake money.
+### 3\. Running the Live/Paper Bot
 
-### 1. Paper Mode Setting
-Set "PAPER_MODE = True" in live_main.py
+To start scanning the live markets, simply run the main execution file. (To switch between Paper Money and Real Money, toggle the `PAPER_MODE` boolean inside the script).
 
-### 2. Run main.py
-```bash
+```
 python live_main.py
+
 ```
 
-## 📊 Outcome So Far (One-Year Test)
+### 4\. Running Unit Tests
 
-**Period:** Jan 2, 2025 – Dec 31, 2025 | **Pair:** ETH-USD | **Initial Balance:** $1,000
+To verify the integrity of the risk management math before deploying:
 
-During this period, the Ethereum market was in a consistent downtrend. While a passive investor would have lost money, the bot successfully generated a profit by identifying shorting opportunities.
+```
+python test_risk.py
 
-| Metric | Buy & Hold (The Market) | SMC Trading Bot (Our Bot) |
-| :--- | :--- | :--- |
-| **Price Movement** | $3,411.52 → $2,970.33 | $3,411.52 → $2,970.33 |
-| **Total Return** | -12.93% (Loss) | **+168.605% (Profit)** |
-| **Max Drawdown** | ~ -30.00% | **-21.56%** |
-| **Final Equity** | $870.70 | **$2686.05** |
-| **Performance Gap** | Baseline | **+181.535% Over Market** |
+```
 
-### Key Performance Highlights
-* **Bear Market Alpha:** The bot generated a **+168.605%** return while the underlying asset fell by nearly 13%.
-* **Superior Risk Management:** The bot achieved these gains with a Maximum Drawdown of only **21.56%**, significantly lower than the volatility experienced by holding the asset.
-* **Short-Selling Success:** Profits were largely driven by the bot's ability to "Short" the market during structural shifts and FVG fills in a declining environment.
+* * * * *
 
-## 📈 Upcoming Features
-* [x] **Telegram Integration:** Real-time heartbeat and trade notifications.
-* [x] **Dual-Mode Architecture:** Separation of Research (`main.py`) and Execution (`live_main.py`).
-* [ ] **Remote Commands:** Ability to "Emergency Stop" or "Reboot" the bot via Telegram chat.
-* [ ] **Dedicated Hardware:** Migrating to a 24/7 Mini PC for maximum uptime.
+⚠️ Disclaimer
+-------------
+
+**This software is for educational and research purposes only.** Algorithmic trading involves significant risk of loss. The dynamic kill switch and risk management features are mitigations, not guarantees. Always test extensively in Paper Mode before risking real capital.

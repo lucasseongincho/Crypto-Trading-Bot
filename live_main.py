@@ -23,7 +23,7 @@ CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 # --- 2. CONFIGURATION ---
 PAPER_MODE = True  # Set to False to execute real trades
 PRODUCT_ID = "BTC-USD"
-BALANCE = 1000.0   # Default starting balance for Paper Mode
+BALANCE = 20000.0   # Default starting balance for Paper Mode
 TOTAL_TRADES = 0   
 IS_IN_POSITION = False 
 
