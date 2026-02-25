@@ -124,6 +124,7 @@ def run_bot():
 
             # ⏳ Sync to 5-minute candle closes
             wait = 300 - (int(time.time()) % 300) + 2
+            print(f"⌛ Syncing... scanning in {wait}s")
             time.sleep(wait)
 
             now = int(time.time())
