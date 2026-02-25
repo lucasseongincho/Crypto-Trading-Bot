@@ -10,12 +10,12 @@ class RiskManager:
     def calculate_size(self, entry_price, stop_loss):
         """
         Calculates position size based on risking 1% of the current balance.
-        Includes a safety check to prevent massive sizes on micro-spreads.
+        Includes safety checks for micro-spreads and Spot account limits.
         """
         risk_amount = self.current_balance * 0.01
         risk_per_coin = abs(entry_price - stop_loss)
         
-        # 🛡️ THE FIX: Reject the trade if the SL is too close to the Entry
+        # 🛡️ SAFETY 1: Reject the trade if the SL is too close to the Entry
         if risk_per_coin < self.min_sl_distance:
             print(f"⚠️ Trade Rejected: Stop Loss distance (${risk_per_coin:.2f}) is below the ${self.min_sl_distance} minimum safe threshold.")
             return 0
@@ -23,9 +23,18 @@ class RiskManager:
         if risk_per_coin == 0:
             return 0
             
-        # Return quantity of coin to buy/sell
-        qty = risk_amount / risk_per_coin
-        return qty
+        # Calculate ideal quantity based on risk
+        ideal_qty = risk_amount / risk_per_coin
+        
+        # 🛡️ SAFETY 2: Spot Trading Purchasing Power Cap
+        # We use 0.98 to leave a 2% buffer for Coinbase trading fees
+        max_affordable_qty = (self.current_balance * 0.98) / entry_price
+        
+        if ideal_qty > max_affordable_qty:
+            print(f"⚠️ Spot Cap Active: Ideal size {ideal_qty:.4f} BTC costs too much. Capping at {max_affordable_qty:.4f} BTC.")
+            return max_affordable_qty
+            
+        return ideal_qty
 
     def log_virtual_trade(self, trade_date, signal_type, entry_price, result):
         """
