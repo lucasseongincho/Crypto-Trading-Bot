@@ -3,6 +3,7 @@ import sys
 import time
 import requests
 import pandas as pd
+import uuid
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
@@ -146,9 +147,43 @@ def run_bot():
                     qty = risk.calculate_size(entry, sl)
                     
                     if qty > 0:
-                        # Logic to execute and manage trade would go here
-                        # (Keeping your manage_trade structure)
-                        pass 
+                        # 1. Format quantity to 5 decimals to prevent Coinbase "Tick Size" errors
+                        formatted_qty = f"{qty:.5f}"
+                        print(f"🚀 ATTEMPTING TO EXECUTE {side} ORDER FOR {formatted_qty} {PRODUCT_ID}...")
+                        
+                        try:
+                            # 2. Generate a unique Order ID (Required by Coinbase)
+                            order_id = str(uuid.uuid4())
+                            
+                            # 3. Execute the Market Order based on trade direction
+                            if side.upper() in ['BUY', 'LONG']:
+                                response = client.market_order_buy(
+                                    client_order_id=order_id,
+                                    product_id=PRODUCT_ID,
+                                    base_size=formatted_qty
+                                )
+                            elif side.upper() in ['SELL', 'SHORT']:
+                                response = client.market_order_sell(
+                                    client_order_id=order_id,
+                                    product_id=PRODUCT_ID,
+                                    base_size=formatted_qty
+                                )
+                            else:
+                                print(f"⚠️ Unknown trade side: {side}")
+                                continue
+
+                            # 4. Success! Log it and alert Telegram
+                            print(f"✅ TRADE EXECUTED SUCCESSFULLY! Coinbase Response: {response}")
+                            send_telegram(f"✅ LIVE TRADE EXECUTED!\nDirection: {side}\nSize: {formatted_qty} BTC\nTarget Entry: ${entry:.2f}")
+                            
+                            # 5. Tell the bot we are now in a trade
+                            IS_IN_POSITION = True
+                            
+                        except Exception as e:
+                            # 🚨 If Coinbase rejects it, this will scream EXACTLY why
+                            error_msg = f"❌ TRADE FAILED TO EXECUTE: {e}"
+                            print(error_msg)
+                            send_telegram(error_msg)
 
         except Exception as e:
             print(f"Main Loop Error: {e}"); time.sleep(30)
