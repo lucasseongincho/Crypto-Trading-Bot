@@ -3,12 +3,13 @@ Page 1 — Live Monitor
 Fetches live BTC-USD data from Coinbase, runs the SMC strategy,
 and renders a candlestick chart with OB/FVG overlays.
 """
-import sys, time
+import sys, time, json
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 from pathlib import Path
 from datetime import datetime
+
 # Allow importing from the parent directory
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from ob_fvg import detect_order_blocks, detect_fvg
@@ -17,7 +18,9 @@ from trendline import detect_trend
 from fakeout import detect_fakeout
 from strategy import SMCStrategy
 from risk import RiskManager
+
 st.set_page_config(page_title="Live Monitor", page_icon="📡", layout="wide")
+
 # ── Shared CSS (imported via st.markdown so it applies on this page too) ──
 st.markdown("""
 <style>
@@ -41,6 +44,7 @@ hr { border-color:#2a2a4a; }
 .badge-none  { background:#1a1a2e; color:#7070a0; border:1px solid #7070a044; }
 </style>
 """, unsafe_allow_html=True)
+
 # ──────────────────────────────────────────────
 # Helpers
 # ──────────────────────────────────────────────
@@ -48,12 +52,25 @@ BASE_DIR    = Path(__file__).parent.parent
 PRODUCT_ID  = "BTC-USD"
 CANDLE_GRAN = "FIVE_MINUTE"
 HTF_GRAN    = "SIX_HOUR"
+
 def get_coinbase_client():
     try:
         from auth import client
         return client
     except Exception as e:
         return None
+
+def get_bot_status():
+    """Reads the JSON bridge file from the live bot."""
+    status_file = BASE_DIR / "bot_status.json"
+    if status_file.exists():
+        try:
+            with open(status_file, "r") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {"is_in_position": False}
+
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_live_balance(dummy_ts):
     client = get_coinbase_client()
@@ -66,6 +83,7 @@ def fetch_live_balance(dummy_ts):
                 return float(acc["available_balance"]["value"])
     except Exception:
         return None
+
 @st.cache_data(ttl=30, show_spinner=False)
 def fetch_candles(dummy_ts):
     client = get_coinbase_client()
@@ -75,6 +93,7 @@ def fetch_candles(dummy_ts):
         now = int(time.time())
         resp_5m  = client.get_public_candles(PRODUCT_ID, str(now - 300*150),    str(now), CANDLE_GRAN)
         resp_htf = client.get_public_candles(PRODUCT_ID, str(now - 21600*50),   str(now), HTF_GRAN)
+        
         def parse(resp):
             raw = resp["candles"] if isinstance(resp, dict) else resp.candles
             rows = []
@@ -92,25 +111,41 @@ def fetch_candles(dummy_ts):
                 if "start" in df.columns:
                     df["datetime"] = pd.to_datetime(df["start"], unit="s")
             return df
+            
         return parse(resp_5m), parse(resp_htf)
     except Exception as e:
         st.error(f"Coinbase API error: {e}")
         return pd.DataFrame(), pd.DataFrame()
+
 # ──────────────────────────────────────────────
 # UI
 # ──────────────────────────────────────────────
 st.markdown("# 📡 Live Monitor")
 st.caption("Auto-refreshes every 30 s via Coinbase Advanced Trade API (read-only).")
+
 refresh_col, _ = st.columns([1, 5])
 with refresh_col:
     if st.button("🔄 Refresh Now"):
         st.cache_data.clear()
+
 st.divider()
+
+# 🌉 THE BRIDGE: Check bot status and display banner
+bot_status = get_bot_status()
+
+if bot_status.get("is_in_position"):
+    st.success(f"🤖 **BOT ACTIVE TRADE:** {bot_status.get('side')} {bot_status.get('qty')} BTC @ **${bot_status.get('entry_price'):,.2f}**  |  🎯 TP: **${bot_status.get('take_profit'):,.2f}**  |  🛡️ SL: **${bot_status.get('stop_loss'):,.2f}**")
+else:
+    st.info("🤖 **BOT STATUS:** Scanning for setups... (No active trade)")
+
+
 # Use current minute as cache buster so auto-cache TTL applies
 ts_bucket = int(time.time() // 30)
+
 with st.spinner("Fetching live data…"):
     df_5m, df_htf = fetch_candles(ts_bucket)
     live_balance  = fetch_live_balance(ts_bucket)
+
 # ── KPI Row ──────────────────────────────────
 if df_5m.empty:
     st.warning("⚠️ Could not fetch candle data. Check your API keys and internet connection.")
@@ -118,15 +153,18 @@ else:
     current_price = df_5m.iloc[-1]["close"]
     prev_price    = df_5m.iloc[-2]["close"] if len(df_5m) > 1 else current_price
     price_delta   = current_price - prev_price
+    
     # Run strategy
     strategy = SMCStrategy()
     signal   = strategy.check_setup(df_5m, df_htf if not df_htf.empty else None)
+    
     # Risk / kill switch
     if live_balance:
         risk      = RiskManager(initial_balance=live_balance)
         kill_lim  = live_balance * 0.80  # 20% drawdown threshold
     else:
         kill_lim  = None
+        
     # Indicator data
     visible  = df_5m.tail(100).copy()
     ob_list  = detect_order_blocks(visible)
@@ -136,11 +174,13 @@ else:
     highs    = [s for s in swings if s["type"] == "high"]
     trend    = detect_trend(lows, highs)
     fakeout  = detect_fakeout(visible, swings)
+    
     # HTF bias
     if not df_htf.empty and len(df_htf) >= 2:
         htf_bias = "BULLISH" if df_htf.iloc[-1]["close"] > df_htf.iloc[-2]["close"] else "BEARISH"
     else:
         htf_bias = "N/A"
+        
     # ── 5 KPI cards ──
     k1, k2, k3, k4, k5 = st.columns(5)
     k1.metric("BTC Price (USD)",  f"${current_price:,.2f}", f"{price_delta:+.2f}")
@@ -148,7 +188,9 @@ else:
     k3.metric("Kill-Switch Limit", f"${kill_lim:,.2f}"    if kill_lim  else "N/A")
     k4.metric("HTF Bias",          htf_bias)
     k5.metric("Last Refresh",      datetime.now().strftime("%H:%M:%S"))
+    
     st.divider()
+    
     # ── Signal + Trend badges ──
     badge_col1, badge_col2, badge_col3 = st.columns(3)
     with badge_col1:
@@ -156,9 +198,9 @@ else:
             sig_type  = signal["type"]
             cls       = "badge-buy" if sig_type == "BUY" else "badge-sell"
             emo       = "🟢" if sig_type == "BUY" else "🔴"
-            st.markdown(f"**Signal:** <span class='badge {cls}'>{emo} {sig_type} @ ${signal['entry_price']:,.2f} | SL ${signal['stop_loss']:,.2f}</span>", unsafe_allow_html=True)
+            st.markdown(f"**Scanner Setup:** <span class='badge {cls}'>{emo} {sig_type} @ ${signal['entry_price']:,.2f} | SL ${signal['stop_loss']:,.2f}</span>", unsafe_allow_html=True)
         else:
-            st.markdown("<span class='badge badge-none'>⚪ No Signal</span>", unsafe_allow_html=True)
+            st.markdown("<span class='badge badge-none'>⚪ No Scanner Setup</span>", unsafe_allow_html=True)
     with badge_col2:
         t_cls = {"UPTREND": "badge-bull", "DOWNTREND": "badge-bear", "RANGING": "badge-range"}.get(trend, "badge-range")
         t_emo = {"UPTREND": "📈", "DOWNTREND": "📉", "RANGING": "↔️"}.get(trend, "")
@@ -169,11 +211,14 @@ else:
             st.markdown(f"**Fakeout:** <span class='badge {fk_cls}'>⚡ {fakeout}</span>", unsafe_allow_html=True)
         else:
             st.markdown("<span class='badge badge-none'>— No Fakeout</span>", unsafe_allow_html=True)
+            
     st.divider()
+    
     # ── Candlestick chart ──
     st.markdown("### BTC-USD — 5 Minute Candles (Last 100)")
     plot_df = df_5m.tail(150).copy()
     fig = go.Figure()
+    
     # Candlesticks
     fig.add_trace(go.Candlestick(
         x=plot_df["datetime"],
@@ -185,6 +230,7 @@ else:
         increasing_fillcolor="#1a4a2e",
         decreasing_fillcolor="#4a1a1a",
     ))
+    
     # Volume bars (secondary y-axis)
     if "volume" in plot_df.columns:
         fig.add_trace(go.Bar(
@@ -192,6 +238,7 @@ else:
             name="Volume", marker_color="#3a3a6a",
             opacity=0.4, yaxis="y2"
         ))
+        
     # Order Block rectangles
     for ob in ob_list[-5:]:
         x0 = plot_df.iloc[max(0, ob["index"] - 2)]["datetime"]
@@ -205,6 +252,7 @@ else:
                            text=f"OB {'▲' if ob['type']=='bullish' else '▼'}",
                            font=dict(color=line_color, size=10), showarrow=False,
                            xanchor="right")
+                           
     # FVG rectangles
     for fvg in fvg_list[-5:]:
         if fvg["index"] < len(plot_df):
@@ -219,15 +267,35 @@ else:
                                text=f"FVG {'▲' if fvg['type']=='bullish' else '▼'}",
                                font=dict(color=lc, size=10), showarrow=False,
                                xanchor="right")
-    # Signal line
-    if signal:
+                               
+    # 🌉 CHART BRIDGE: Active Trade Lines vs Scanner Signals
+    if bot_status.get("is_in_position"):
+        # Draw the real, active trade the bot is managing
+        ep = bot_status.get("entry_price")
+        sl = bot_status.get("stop_loss")
+        tp = bot_status.get("take_profit")
+        side = bot_status.get("side")
+        
+        # Color based on trade direction
+        entry_color = "#2ecc71" if side in ["BUY", "LONG"] else "#e74c3c"
+        
+        fig.add_hline(y=ep, line_color=entry_color, line_dash="solid", line_width=2,
+                      annotation_text=f"ACTIVE {side} ENTRY", annotation_font_color=entry_color)
+        fig.add_hline(y=tp, line_color="#3498db", line_dash="dashdot", line_width=1.5,
+                      annotation_text="TAKE PROFIT", annotation_font_color="#3498db")
+        fig.add_hline(y=sl, line_color="#ff9900", line_dash="dot", line_width=1.5,
+                      annotation_text="STOP LOSS", annotation_font_color="#ff9900")
+                      
+    elif signal:
+        # If not in a trade, show what the scanner is currently seeing
         ep = signal["entry_price"]
         sl = signal["stop_loss"]
         sig_color = "#2ecc71" if signal["type"] == "BUY" else "#e74c3c"
         fig.add_hline(y=ep, line_color=sig_color, line_dash="dash", line_width=1.5,
-                      annotation_text=f"{signal['type']} Entry", annotation_font_color=sig_color)
+                      annotation_text=f"Setup: {signal['type']} Entry", annotation_font_color=sig_color)
         fig.add_hline(y=sl, line_color="#ff9900", line_dash="dot", line_width=1,
-                      annotation_text="Stop Loss", annotation_font_color="#ff9900")
+                      annotation_text="Setup: Stop Loss", annotation_font_color="#ff9900")
+                      
     fig.update_layout(
         paper_bgcolor="#0d0d1a", plot_bgcolor="#0d0d1a",
         font=dict(color="#c0c0e0", family="Inter"),
@@ -242,6 +310,7 @@ else:
     fig.update_xaxes(showspikes=True, spikecolor="#6c63ff", spikethickness=1)
     fig.update_yaxes(showspikes=True, spikecolor="#6c63ff", spikethickness=1)
     st.plotly_chart(fig, use_container_width=True)
+    
     # ── Swing points table ──
     with st.expander("🔎 Detected Swing Points (last 10)"):
         if swings:
