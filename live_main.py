@@ -13,7 +13,6 @@ from dotenv import load_dotenv
 from auth import client # Uses your cdp_api_key.json hub
 from strategy import SMCStrategy
 from risk import RiskManager
-import journal 
 
 # --- 1. SETUP & ENV ---
 base_dir = Path(__file__).resolve().parent
