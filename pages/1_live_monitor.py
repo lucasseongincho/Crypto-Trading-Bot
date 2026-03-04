@@ -109,7 +109,8 @@ def fetch_candles(dummy_ts):
                     if col in df.columns:
                         df[col] = df[col].astype(float)
                 if "start" in df.columns:
-                    df["datetime"] = pd.to_datetime(df["start"], unit="s")
+                    # Convert UNIX to UTC, then translate to New York time
+                    df["datetime"] = pd.to_datetime(df["start"], unit="s").dt.tz_localize("UTC").dt.tz_convert("America/New_York")
             return df
             
         return parse(resp_5m), parse(resp_htf)
