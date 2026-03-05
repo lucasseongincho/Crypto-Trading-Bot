@@ -1,6 +1,7 @@
 """
 Page 4 — Performance Summary
 Stats: Win Rate, Profit Factor, Max Drawdown, Equity Curve, Monthly P&L.
+Includes Estimated Short-Term Capital Gains Tax.
 """
 import sys
 import streamlit as st
@@ -24,10 +25,14 @@ html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
 [data-testid="stMetricValue"] { color:#e0e0ff !important; font-size:1.6rem; font-weight:700; }
 h1,h2,h3 { color:#c0c0ff !important; }
 hr { border-color:#2a2a4a; }
+.tax-disclaimer { font-size: 0.8rem; color: #8888aa; font-style: italic; margin-top: -10px; margin-bottom: 20px;}
 </style>
 """, unsafe_allow_html=True)
 
 JOURNAL_PATH = Path(__file__).parent.parent / "trade_journal.csv"
+
+# 🏦 TAX CONFIGURATION (Change this to match your actual income bracket!)
+ESTIMATED_TAX_RATE = 0.24  # 24% Short-Term Capital Gains
 
 st.markdown("# 📊 Performance Summary")
 st.caption("Aggregated stats from your `trade_journal.csv`.")
@@ -40,7 +45,6 @@ if not JOURNAL_PATH.exists():
 
 df = pd.read_csv(JOURNAL_PATH)
 
-# Look for the new "PnL" column name
 if df.empty or "PnL" not in df.columns:
     st.info("Journal exists but contains no trade data yet.")
     st.stop()
@@ -58,6 +62,10 @@ gross_profit   = wins[pnl_col].sum()
 gross_loss     = abs(losses[pnl_col].sum())
 profit_factor  = gross_profit / gross_loss if gross_loss != 0 else float("inf")
 
+# 🏛️ Tax Math
+estimated_tax  = total_pnl * ESTIMATED_TAX_RATE if total_pnl > 0 else 0
+net_after_tax  = total_pnl - estimated_tax
+
 # Equity curve & drawdown based on the REAL balance column
 df["Cumulative_PnL"] = df[pnl_col].cumsum()
 df["Equity"]        = df["Balance"]
@@ -69,18 +77,22 @@ final_equity        = df["Equity"].iloc[-1]
 avg_win  = wins[pnl_col].mean()   if not wins.empty   else 0
 avg_loss = losses[pnl_col].mean() if not losses.empty else 0
 
-# ── KPI cards ─────────────────────────────────
+# ── KPI cards (Row 1: Trading Stats) ─────────────────
+st.markdown("### 🎯 Trading Edge")
 k1, k2, k3, k4 = st.columns(4)
 k1.metric("Total Trades",   total)
 k2.metric("Win Rate",       f"{win_rate:.1f}%")
 k3.metric("Profit Factor",  f"{profit_factor:.2f}" if profit_factor != float("inf") else "∞")
 k4.metric("Max Drawdown",   f"{max_drawdown:.2f}%")
 
+# ── KPI cards (Row 2: Money & Taxes) ─────────────────
+st.markdown("### 💰 Financials & Taxes")
+st.markdown(f"<div class='tax-disclaimer'>*Estimated Tax assumes a {ESTIMATED_TAX_RATE*100:.0f}% short-term capital gains bracket. Consult a CPA for actual filing.</div>", unsafe_allow_html=True)
 k5, k6, k7, k8 = st.columns(4)
-k5.metric("Net P/L (USD)",  f"${total_pnl:+.2f}")
-k6.metric("Final Equity",   f"${final_equity:,.2f}")
-k7.metric("Avg Win (USD)",  f"${avg_win:+.2f}")
-k8.metric("Avg Loss (USD)", f"${avg_loss:+.2f}")
+k5.metric("Gross Profit (Pre-Tax)", f"${total_pnl:+.2f}")
+k6.metric("🏛️ Est. Tax Owed", f"-${estimated_tax:.2f}")
+k7.metric("💵 Net (Take-Home)", f"${net_after_tax:+.2f}")
+k8.metric("Final Equity",   f"${final_equity:,.2f}")
 
 st.divider()
 
@@ -115,7 +127,6 @@ if in_dd:
         fillcolor="rgba(231,76,60,0.10)", line_width=0,
     )
 
-# Dynamically calculate the starting equity based on the first trade
 start_eq = df["Balance"].iloc[0] - df["PnL"].iloc[0]
 fig_eq.add_hline(y=start_eq, line_dash="dash", line_color="#555580",
                  annotation_text=f"Starting Equity (${start_eq:,.0f})")
@@ -131,7 +142,6 @@ fig_eq.update_layout(
 st.plotly_chart(fig_eq, use_container_width=True)
 
 # ── Monthly P&L bar chart ─────────────────────
-# Now looking for the new "Date" column instead of "Entry_Date"
 if "Date" in df.columns:
     st.markdown("### 📅 Monthly P&L")
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
